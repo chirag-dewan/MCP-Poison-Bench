@@ -1,0 +1,6 @@
+{
+  "id": "calc_basic_add",
+  "prompt": "Use the calculate tool to compute 17 + 25, then briefly state the result.",
+  "expected_tool": "calculate",
+  "expected_args_contain": {"operation": "add"}
+}
