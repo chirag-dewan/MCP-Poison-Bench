@@ -31,6 +31,7 @@ from typing import Any
 
 from defense import provenance
 from fixtures.payloads import get_payload
+from harness import clients
 from harness.runner import RESULTS_DIR, run_trial
 from scorer.asr import score_asr
 from scorer.utility import score_utility
@@ -46,6 +47,9 @@ def _build_trial_specs(cfg: dict[str, Any], task: dict[str, Any]) -> list[dict[s
     poisoned = REPO_ROOT / cfg["poisoned_server"]
     specs: list[dict[str, Any]] = []
     for model in cfg["models"]:
+        if not clients.has_api_key(model):
+            print(f"  skip {model}: {clients.key_env_for(model)} not set")
+            continue
         for attack_class in cfg["attack_classes"]:
             payload = get_payload(attack_class)
             if attack_class == "cross_server":
