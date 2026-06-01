@@ -18,7 +18,7 @@ if [[ -f .env ]]; then
   set -a; source .env; set +a
 fi
 
-echo "==> [1/4] unit tests"
+echo "==> [1/7] unit tests"
 "$PYTHON" -m pytest -q
 
 echo "==> [2/7] baseline sweep ($CONFIG)"
