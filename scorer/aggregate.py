@@ -26,7 +26,11 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parent.parent
 RESULTS_DIR = REPO_ROOT / "results"
 TRIALS_PATH = RESULTS_DIR / "trials.jsonl"
+TRIALS_DEFENDED_PATH = RESULTS_DIR / "trials_defended.jsonl"
 MATRIX_PATH = RESULTS_DIR / "matrix.csv"
+MATRIX_DEFENDED_PATH = RESULTS_DIR / "matrix_defended.csv"
+DELTA_CSV_PATH = RESULTS_DIR / "delta.csv"
+DELTA_MD_PATH = RESULTS_DIR / "delta_table.md"
 
 Z_95 = 1.959963984540054  # standard normal quantile for a 95% two-sided interval
 
@@ -101,7 +105,7 @@ def build_cells(trials: list[dict[str, Any]]) -> list[Cell]:
 
 def write_matrix(cells: list[Cell], path: str | Path = MATRIX_PATH) -> Path:
     """Write the benchmark matrix CSV. One row per (model, attack_class) cell."""
-    path = Path(path)
+    path = Path(path).resolve()
     path.parent.mkdir(exist_ok=True)
     fields = [
         "model", "attack_class", "n",
@@ -132,6 +136,91 @@ def aggregate(
     return cells, out
 
 
+def build_delta(
+    baseline_path: str | Path = TRIALS_PATH,
+    defended_path: str | Path = TRIALS_DEFENDED_PATH,
+) -> list[dict[str, Any]]:
+    """Join baseline and defended cells into per-cell delta rows.
+
+    Rows are keyed by (model, attack_class). ASR/utility deltas are defended
+    minus baseline (negative ASR delta == the defense reduced attack success).
+    """
+    base = {(c.model, c.attack_class): c for c in build_cells(load_trials(baseline_path))}
+    deff = {(c.model, c.attack_class): c for c in build_cells(load_trials(defended_path))}
+    keys = sorted(set(base) | set(deff))
+    rows: list[dict[str, Any]] = []
+    for model, attack_class in keys:
+        b, d = base.get((model, attack_class)), deff.get((model, attack_class))
+        row = {
+            "model": model,
+            "attack_class": attack_class,
+            "n_baseline": b.n if b else 0,
+            "n_defended": d.n if d else 0,
+            "asr_baseline": b.asr_mean if b else None,
+            "asr_defended": d.asr_mean if d else None,
+            "asr_delta": (d.asr_mean - b.asr_mean) if (b and d) else None,
+            "utility_baseline": b.utility_mean if b else None,
+            "utility_defended": d.utility_mean if d else None,
+            "utility_delta": (d.utility_mean - b.utility_mean) if (b and d) else None,
+        }
+        rows.append(row)
+    return rows
+
+
+def write_delta_csv(rows: list[dict[str, Any]], path: str | Path = DELTA_CSV_PATH) -> Path:
+    path = Path(path)
+    path.parent.mkdir(exist_ok=True)
+    fields = [
+        "model", "attack_class", "n_baseline", "n_defended",
+        "asr_baseline", "asr_defended", "asr_delta",
+        "utility_baseline", "utility_defended", "utility_delta",
+    ]
+    with path.open("w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=fields)
+        w.writeheader()
+        for r in rows:
+            w.writerow({
+                k: (f"{v:.4f}" if isinstance(v, float) else v) for k, v in r.items()
+            })
+    return path
+
+
+def _fmt(v: Any) -> str:
+    return f"{v:.2f}" if isinstance(v, float) else ("—" if v is None else str(v))
+
+
+def write_delta_md(rows: list[dict[str, Any]], path: str | Path = DELTA_MD_PATH) -> Path:
+    path = Path(path)
+    path.parent.mkdir(exist_ok=True)
+    header = (
+        "| model | attack_class | n | ASR base | ASR def | ΔASR | "
+        "util base | util def | Δutil |\n"
+        "|---|---|---|---|---|---|---|---|---|\n"
+    )
+    lines = []
+    for r in rows:
+        lines.append(
+            f"| {r['model']} | {r['attack_class']} | {r['n_baseline']} | "
+            f"{_fmt(r['asr_baseline'])} | {_fmt(r['asr_defended'])} | "
+            f"{_fmt(r['asr_delta'])} | {_fmt(r['utility_baseline'])} | "
+            f"{_fmt(r['utility_defended'])} | {_fmt(r['utility_delta'])} |"
+        )
+    path.write_text(header + "\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+def _format_delta(rows: list[dict[str, Any]]) -> str:
+    out = [
+        f"{'model':<28} {'attack_class':<16} "
+        f"{'ASR base→def (Δ)':>22} {'util base→def (Δ)':>24}"
+    ]
+    for r in rows:
+        asr = f"{_fmt(r['asr_baseline'])}→{_fmt(r['asr_defended'])} ({_fmt(r['asr_delta'])})"
+        util = f"{_fmt(r['utility_baseline'])}→{_fmt(r['utility_defended'])} ({_fmt(r['utility_delta'])})"
+        out.append(f"{r['model']:<28} {r['attack_class']:<16} {asr:>22} {util:>24}")
+    return "\n".join(out)
+
+
 def _format_table(cells: list[Cell]) -> str:
     lines = [
         f"{'model':<28} {'attack_class':<16} {'n':>3} "
@@ -149,9 +238,33 @@ def _format_table(cells: list[Cell]) -> str:
 
 
 def main() -> None:
-    cells, out = aggregate()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="MCP-Poison-Bench aggregator.")
+    parser.add_argument("--trials", type=Path, default=TRIALS_PATH,
+                        help="trial records to aggregate into a matrix")
+    parser.add_argument("--matrix", type=Path, default=MATRIX_PATH,
+                        help="output matrix CSV path")
+    parser.add_argument("--delta", action="store_true",
+                        help="emit the baseline-vs-defended delta table instead")
+    parser.add_argument("--baseline", type=Path, default=TRIALS_PATH)
+    parser.add_argument("--defended", type=Path, default=TRIALS_DEFENDED_PATH)
+    args = parser.parse_args()
+
+    if args.delta:
+        rows = build_delta(args.baseline, args.defended)
+        if not rows:
+            print("no trials to compare — run baseline and defended sweeps first.")
+            return
+        csv_out = write_delta_csv(rows)
+        md_out = write_delta_md(rows)
+        print(_format_delta(rows))
+        print(f"\nwrote {csv_out.relative_to(REPO_ROOT)} and {md_out.relative_to(REPO_ROOT)}")
+        return
+
+    cells, out = aggregate(args.trials, args.matrix)
     if not cells:
-        print("no trials found at results/trials.jsonl — run the sweep first.")
+        print(f"no trials found at {args.trials} — run the sweep first.")
         return
     print(_format_table(cells))
     print(f"\nwrote {out.relative_to(REPO_ROOT)}")
