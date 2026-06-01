@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests (offline — no API key required)
+        run: pytest -q
+
+      - name: Verify descriptor catalog is in sync
+        run: |
+          python -m dataset.build_neutered_dataset
+          git diff --exit-code dataset/poisoned_descriptors.json
