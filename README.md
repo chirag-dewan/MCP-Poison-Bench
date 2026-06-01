@@ -10,7 +10,7 @@ adversarial self-evaluation of the defense itself.**
 
 > **Novelty in one sentence.** Prior MCP-security work either *measures the attack*
 > (MCPTox — tool poisoning on 45 real-world servers, ASR up to 72.8% — but ships no
-> defense) or *threat-models and proposes mitigations* (arXiv:2603.22489 — STRIDE/DREAD
+> defense) or *threat-models and proposes mitigations* (Huang et al., arXiv:2603.22489 — STRIDE/DREAD
 > modeling and a survey of how 7 clients validate metadata, with a *recommended*
 > multi-layer defense). **This work closes the loop: we implement one of those
 > recommended mitigations — a client-side provenance + static-metadata-validation
@@ -32,7 +32,7 @@ tool-poisoning classes. No third-party deployed product was attacked. See
 | | Attack measured | Defense built | Defense measured (Δ) | Defense attacked |
 |---|:---:|:---:|:---:|:---:|
 | MCPTox (arXiv:2508.14925) | ✅ real servers | ❌ | ❌ | ❌ |
-| arXiv:2603.22489 | ✅ (threat model) | proposed | ❌ | ❌ |
+| Huang et al. (arXiv:2603.22489) | ✅ (threat model) | proposed | ❌ | ❌ |
 | **This work** | ✅ 4 classes × 3 models | ✅ | ✅ **−1.00 ASR**, util retained | ✅ **9/11 bypass** |
 
 - **Exposure exists and is model-dependent.** Across 4 attack classes × {Opus 4.8,
@@ -169,18 +169,27 @@ redactions, and the documented bypasses (encoded so a silent regression flips a 
 ## Related work (positioning)
 
 - **MCPTox** (arXiv:2508.14925): the first tool-poisoning benchmark on real-world MCP
-  servers (45 servers, 353 tools, 1312 cases, 20 agents; ASR up to 72.8%, refusal < 3%).
+  servers (45 servers, 353 tools, 1312 cases, 20 agents; ASR up to 72.8% on o1-mini,
+  refusal < 3%).
   Breadth on *attack measurement*; no defense. We are narrower on attack surface (a
   controlled harness) but add a **measured defense and its adversarial evaluation**.
-- **arXiv:2603.22489** (MCP threat modeling, 2026): STRIDE/DREAD modeling and a survey of
-  static-validation/parameter-visibility gaps across 7 clients, with a *proposed*
-  multi-layer defense. We **implement and empirically measure** one layer of that
-  proposal (static metadata analysis + provenance) and report its delta and limits.
-- **Invariant Labs** (tool-poisoning / rug-pull disclosure, 2025): origin of the attack
-  class definitions we operationalize.
-- **AgentDojo**, **InjecAgent**: controlled-environment benchmarks for indirect prompt
-  injection in tool-using agents; we adopt that philosophy but target the MCP *metadata*
-  trust boundary specifically and pair every attack with a defended measurement.
+- **Charoes Huang et al.**, *Model Context Protocol Threat Modeling and Analyzing
+  Vulnerabilities to Prompt Injection with Tool Poisoning* (arXiv:2603.22489, 2026):
+  STRIDE/DREAD modeling and a survey of static-validation/parameter-visibility gaps across
+  7 clients, with a *proposed* multi-layer defense. We **implement and empirically measure**
+  one layer of that proposal (static metadata analysis + provenance) and report its delta
+  and limits.
+- **Invariant Labs**, [MCP Security Notification: Tool Poisoning Attacks](https://invariantlabs.ai/blog/mcp-security-notification-tool-poisoning-attacks)
+  (6 April 2025): origin of the tool-poisoning and rug-pull attack class definitions we
+  operationalize.
+- **AgentDojo**, **InjecAgent** (arXiv:2403.02691, Findings of ACL 2024):
+  controlled-environment benchmarks for indirect prompt injection in tool-using agents; we
+  adopt that philosophy but target the MCP *metadata* trust boundary specifically and pair
+  every attack with a defended measurement.
+- **CaMeL** (arXiv:2503.18813; Google / Google DeepMind / ETH Zürich): a design-level
+  prompt-injection defense that confines untrusted data so injected instructions cannot take
+  privileged actions — the architectural direction our heuristic layer's measured limits
+  point toward.
 
 ---
 
