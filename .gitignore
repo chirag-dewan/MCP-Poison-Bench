@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .env
+CLAUDE.md
 results/*.jsonl
 results/*.csv
 results/spotcheck/
