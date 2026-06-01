@@ -8,7 +8,7 @@ adversarial bypasses.
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
-pytest -q          # 31 tests, fully offline (no API key needed)
+pytest -q          # 37 tests, fully offline (no API key needed)
 ```
 
 ## Conventions

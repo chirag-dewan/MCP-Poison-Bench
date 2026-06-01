@@ -82,16 +82,20 @@ python -m harness.runner --server servers/poisoned/server.py --task tasks/calc_a
     --model claude-haiku-4-5-20251001 --seed 42 --poison-class tool_description [--defense]
 ```
 
-Tests only (offline, no API key): `pytest -q` (31 tests).
+Tests only (offline, no API key): `pytest -q` (37 tests).
 
 ### Environment (pinned)
 
 - **Python 3.14.3** (`.python-version`)
 - Direct deps pinned in [`requirements.txt`](requirements.txt); full transitive lock in
   [`requirements.lock.txt`](requirements.lock.txt).
-- Only `ANTHROPIC_API_KEY` is required to run sweeps. The three benchmark models are all
-  Anthropic (Opus 4.8 / Sonnet 4.6 / Haiku 4.5); the OpenAI path is wired but inert until
-  `OPENAI_API_KEY` is set (add a `gpt-*` id to the config to use it).
+- `ANTHROPIC_API_KEY` is required to run sweeps — the three benchmark models are all
+  Anthropic (Opus 4.8 / Sonnet 4.6 / Haiku 4.5). A single `ModelClient`
+  ([`harness/clients.py`](harness/clients.py)) also routes **OpenAI** (`gpt-*`, `o*` —
+  `OPENAI_API_KEY`), **DeepSeek** (`deepseek-*`, OpenAI-compatible — `DEEPSEEK_API_KEY`),
+  and **Gemini** (`gemini-*` — `GEMINI_API_KEY`, needs `pip install google-genai`) behind
+  the same canonical interface; add a matching model id to [`config/bench.json`](config/bench.json)
+  to use one. Models whose provider key is unset are skipped with a log — never mocked.
 
 ### Seeds & determinism
 
@@ -146,7 +150,7 @@ servers/
   poisoned/server.py       # parametrized: renders any of the 4 classes by env var
 harness/
   runner.py                # multi-server runner; defense plugs in via tool_transform
-  clients.py               # MCP→model wiring + provider routing (Anthropic / OpenAI)
+  clients.py               # MCP→model wiring; ModelClient routes Anthropic/OpenAI/DeepSeek/Gemini
   sweep.py                 # {model}×{class}×{seed} driver (baseline | --defense)
   spotcheck.py             # real-client (official MCP SDK) external-validity check
 scorer/
@@ -161,8 +165,9 @@ results/                   # matrices, delta, defense_limits, spot-check, traces
 spec.md, CLAUDE.md         # project spec + agent conventions
 ```
 
-Tests: `pytest -q` — 31 tests covering scorers, Wilson-CI reference values, defense
-redactions, and the documented bypasses (encoded so a silent regression flips a test).
+Tests: `pytest -q` — 37 tests covering scorers, Wilson-CI reference values, defense
+redactions, the documented bypasses (encoded so a silent regression flips a test), and
+the ModelClient provider routing + canonical-trace translation.
 
 ---
 
