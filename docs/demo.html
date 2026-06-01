@@ -5,17 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>MCP-Poison-Bench — live demo</title>
 <meta name="description" content="Interactive replay of one MCP tool-poisoning trial: toggle the client-side defense on/off and watch the attack fire or get blocked. Driven by the benchmark's real recorded behavior." />
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400;6..72,500&display=swap" rel="stylesheet" />
 <style>
   :root{
-    --bg:#f4f1ea;--bg-raised:#f4f1ea;--bg-surface:#ece7da;
-    --green:#4c6447;--green-dim:#4c6447;--amber:#6c685f;--red:#a8564c;--red-glow:rgba(168,86,76,.07);
-    --text:#20201d;--muted:#6c685f;--dim:#9a948a;--border:#e4ddcf;--border-bright:#d8d0bf;
+    --bg:#fbfbfa;--bg-raised:#fbfbfa;--bg-surface:#f1f0ee;
+    --green:#448361;--green-dim:#448361;--amber:#787774;--red:#c4554d;--red-glow:rgba(196,85,77,.06);
+    --text:#37352f;--muted:#787774;--dim:#9b9a97;--border:#ebeae8;--border-bright:#e3e2e0;
     --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
-    --display:'Newsreader',Georgia,'Times New Roman',serif;
-    --body:'Inter',-apple-system,system-ui,'Segoe UI',sans-serif;--max:880px;
+    --display:ui-sans-serif,-apple-system,"Segoe UI",Inter,sans-serif;
+    --body:ui-sans-serif,-apple-system,"Segoe UI",Inter,sans-serif;--max:880px;
   }
   *{box-sizing:border-box;margin:0;padding:0}
   body{background:var(--bg);color:var(--text);font-family:var(--body);font-size:16px;line-height:1.65;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
