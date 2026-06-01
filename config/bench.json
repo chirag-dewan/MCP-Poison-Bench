@@ -1,0 +1,20 @@
+{
+  "_comment": "Sweep config for harness/sweep.py. The benchmark runs the full cross product {models} x {attack_classes} x {seeds}. ASR is a rate, so trials sample at temperature>0 to produce genuine Bernoulli variation; seeds index independent trials. Only ANTHROPIC_API_KEY is provisioned here, so all three models are Anthropic; add a gpt-* id + OPENAI_API_KEY to extend.",
+  "task": "tasks/calc_add.json",
+  "benign_server": "servers/benign/server.py",
+  "poisoned_server": "servers/poisoned/server.py",
+  "models": [
+    "claude-opus-4-8",
+    "claude-sonnet-4-6",
+    "claude-haiku-4-5-20251001"
+  ],
+  "attack_classes": [
+    "tool_description",
+    "schema_field",
+    "rug_pull",
+    "cross_server"
+  ],
+  "seeds": [41, 42, 43, 44, 45],
+  "temperature": 1.0,
+  "max_concurrency": 5
+}
