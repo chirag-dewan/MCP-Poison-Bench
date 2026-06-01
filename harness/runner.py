@@ -296,6 +296,8 @@ def main() -> None:
     parser.add_argument("--poison-class", default=None,
                         help="sets POISON_CLASS for poisoned servers")
     parser.add_argument("--poison-payload-id", default=None)
+    parser.add_argument("--defense", action="store_true",
+                        help="flip the client-side provenance/validation defense ON")
     args = parser.parse_args()
 
     task = json.loads(args.task.read_text(encoding="utf-8"))
@@ -305,9 +307,15 @@ def main() -> None:
     if args.poison_payload_id:
         server_env["POISON_PAYLOAD_ID"] = args.poison_payload_id
 
+    tool_transform = None
+    if args.defense:
+        from defense import provenance
+        tool_transform = provenance.build_tool_transform()
+
     summary, trace_path = run_trial(
         server_paths=args.server, task=task, model=args.model, seed=args.seed,
         server_env=server_env or None, temperature=args.temperature,
+        tool_transform=tool_transform,
         extra_config={"attack_class": args.poison_class} if args.poison_class else None,
     )
 

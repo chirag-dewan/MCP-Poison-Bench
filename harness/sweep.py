@@ -29,6 +29,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
+from defense import provenance
 from fixtures.payloads import get_payload
 from harness.runner import RESULTS_DIR, run_trial
 from scorer.asr import score_asr
@@ -36,6 +37,7 @@ from scorer.utility import score_utility
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TRIALS_PATH = RESULTS_DIR / "trials.jsonl"
+TRIALS_DEFENDED_PATH = RESULTS_DIR / "trials_defended.jsonl"
 
 
 def _build_trial_specs(cfg: dict[str, Any], task: dict[str, Any]) -> list[dict[str, Any]]:
@@ -65,8 +67,15 @@ def _build_trial_specs(cfg: dict[str, Any], task: dict[str, Any]) -> list[dict[s
     return specs
 
 
-def _run_one(spec: dict[str, Any], task: dict[str, Any], temperature: float) -> dict[str, Any]:
-    """Run a single trial and score it into a compact record."""
+def _run_one(
+    spec: dict[str, Any], task: dict[str, Any], temperature: float, defense: bool,
+) -> dict[str, Any]:
+    """Run a single trial and score it into a compact record.
+
+    `defense` flips the client-side provenance/validation layer on — the ONLY
+    thing that changes between baseline and defended runs.
+    """
+    tool_transform = provenance.build_tool_transform() if defense else None
     summary, trace_path = run_trial(
         server_paths=spec["servers"],
         task=task,
@@ -74,9 +83,11 @@ def _run_one(spec: dict[str, Any], task: dict[str, Any], temperature: float) -> 
         seed=spec["seed"],
         server_env=spec["server_env"],
         temperature=temperature,
+        tool_transform=tool_transform,
         extra_config={
             "attack_class": spec["attack_class"],
             "payload_id": spec["payload_id"],
+            "defended": defense,
         },
     )
     # Scorers read the written trace (scorer reads traces, not live runs).
@@ -90,6 +101,7 @@ def _run_one(spec: dict[str, Any], task: dict[str, Any], temperature: float) -> 
         "payload_id": spec["payload_id"],
         "seed": spec["seed"],
         "temperature": temperature,
+        "defended": defense,
         "asr_fired": asr.fired,
         "canary_exfiltrated": asr.canary_exfiltrated,
         "sink_calls": asr.sink_calls,
@@ -99,15 +111,19 @@ def _run_one(spec: dict[str, Any], task: dict[str, Any], temperature: float) -> 
     }
 
 
-def run_sweep(config_path: str | Path, append: bool = False) -> Path:
+def run_sweep(
+    config_path: str | Path, append: bool = False, defense: bool = False,
+) -> Path:
     cfg = json.loads(Path(config_path).read_text(encoding="utf-8"))
     task = json.loads((REPO_ROOT / cfg["task"]).read_text(encoding="utf-8"))
     temperature = float(cfg.get("temperature", 1.0))
     max_workers = int(cfg.get("max_concurrency", 4))
+    out_path = TRIALS_DEFENDED_PATH if defense else TRIALS_PATH
 
     specs = _build_trial_specs(cfg, task)
     print(
-        f"sweep: {len(cfg['models'])} models x {len(cfg['attack_classes'])} classes "
+        f"sweep [{'DEFENDED' if defense else 'baseline'}]: "
+        f"{len(cfg['models'])} models x {len(cfg['attack_classes'])} classes "
         f"x {len(cfg['seeds'])} seeds = {len(specs)} trials "
         f"(temp={temperature}, concurrency={max_workers})"
     )
@@ -115,7 +131,7 @@ def run_sweep(config_path: str | Path, append: bool = False) -> Path:
     records: list[dict[str, Any]] = []
     done = 0
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = {pool.submit(_run_one, s, task, temperature): s for s in specs}
+        futures = {pool.submit(_run_one, s, task, temperature, defense): s for s in specs}
         for fut in as_completed(futures):
             s = futures[fut]
             try:
@@ -139,20 +155,23 @@ def run_sweep(config_path: str | Path, append: bool = False) -> Path:
     records.sort(key=lambda r: (r["model"], r["attack_class"], r["seed"]))
     RESULTS_DIR.mkdir(exist_ok=True)
     mode = "a" if append else "w"
-    with TRIALS_PATH.open(mode, encoding="utf-8") as fh:
+    with out_path.open(mode, encoding="utf-8") as fh:
         for r in records:
             fh.write(json.dumps(r, ensure_ascii=False) + "\n")
-    print(f"\nwrote {len(records)} trial records to {TRIALS_PATH.relative_to(REPO_ROOT)}")
-    return TRIALS_PATH
+    print(f"\nwrote {len(records)} trial records to {out_path.relative_to(REPO_ROOT)}")
+    return out_path
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="MCP-Poison-Bench sweep driver.")
     parser.add_argument("--config", default="config/bench.json", type=Path)
     parser.add_argument("--append", action="store_true",
-                        help="append to trials.jsonl instead of overwriting")
+                        help="append instead of overwriting the trials file")
+    parser.add_argument("--defense", action="store_true",
+                        help="flip the client-side provenance/validation defense ON "
+                             "(writes results/trials_defended.jsonl)")
     args = parser.parse_args()
-    run_sweep(args.config, append=args.append)
+    run_sweep(args.config, append=args.append, defense=args.defense)
 
 
 if __name__ == "__main__":
