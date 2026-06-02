@@ -1,0 +1,16 @@
+{
+  "_comment": "gpt-5.5 (flagship reasoning) — does the strongest OpenAI model resist held-out like Claude, or fire like gpt-4o-mini? Own trial files (_gpt55) so the resumable drivers don't collide.",
+  "payload_set": "seen",
+  "benign_server": "servers/benign/server.py",
+  "poisoned_server": "servers/poisoned/server.py",
+  "models": ["gpt-5.5"],
+  "class_tasks": {
+    "tool_description": ["tasks/calc_add.json", "tasks/notes_pipeline.json"],
+    "schema_field": ["tasks/calc_add.json", "tasks/notes_pipeline.json"],
+    "rug_pull": ["tasks/notes_pipeline.json"],
+    "cross_server": ["tasks/account_review.json"]
+  },
+  "seeds": [41, 42, 43, 44, 45, 46, 47, 48, 49, 50],
+  "temperature": 1.0,
+  "max_concurrency": 4
+}
