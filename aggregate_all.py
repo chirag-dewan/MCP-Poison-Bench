@@ -18,7 +18,8 @@ from scorer.aggregate import (
 R = Path(__file__).resolve().parent / "results"
 
 # Each logical group = Anthropic file + cross-vendor file (either may be absent).
-_VENDORS = ["", "_xvendor", "_gpt55", "_gemini"]  # "" = Anthropic
+_VENDORS = ["", "_xvendor", "_gpt55"]  # "" = Anthropic. Gemini dropped: credits
+# depleted mid-run (gemini-3.1-pro 19/120 clean, no defended/seen), not worth chasing.
 GROUPS = {
     "heldout":          [f"trials_heldout{v}.jsonl" for v in _VENDORS] + ["trials_heldout_ext.jsonl"],
     "heldout_defended": [f"trials_heldout_defended{v}.jsonl" for v in _VENDORS] + ["trials_heldout_defended_ext.jsonl"],
