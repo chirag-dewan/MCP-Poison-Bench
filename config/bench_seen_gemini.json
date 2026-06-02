@@ -1,0 +1,16 @@
+{
+  "_comment": "Gemini Pro + Flash. Requires the thought_signature fix in clients.py (Gemini 3.x echoes function-call thought_signatures across turns). Own _gemini trial files.",
+  "payload_set": "seen",
+  "benign_server": "servers/benign/server.py",
+  "poisoned_server": "servers/poisoned/server.py",
+  "models": ["gemini-3.5-flash", "gemini-3.1-pro-preview"],
+  "class_tasks": {
+    "tool_description": ["tasks/calc_add.json", "tasks/notes_pipeline.json"],
+    "schema_field": ["tasks/calc_add.json", "tasks/notes_pipeline.json"],
+    "rug_pull": ["tasks/notes_pipeline.json"],
+    "cross_server": ["tasks/account_review.json"]
+  },
+  "seeds": [41, 42, 43, 44, 45, 46, 47, 48, 49, 50],
+  "temperature": 1.0,
+  "max_concurrency": 4
+}

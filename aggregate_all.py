@@ -18,11 +18,12 @@ from scorer.aggregate import (
 R = Path(__file__).resolve().parent / "results"
 
 # Each logical group = Anthropic file + cross-vendor file (either may be absent).
+_VENDORS = ["", "_xvendor", "_gpt55", "_gemini"]  # "" = Anthropic
 GROUPS = {
-    "heldout":          ["trials_heldout.jsonl", "trials_heldout_xvendor.jsonl", "trials_heldout_gpt55.jsonl"],
-    "heldout_defended": ["trials_heldout_defended.jsonl", "trials_heldout_defended_xvendor.jsonl", "trials_heldout_defended_gpt55.jsonl"],
-    "seen":             ["trials_seen.jsonl", "trials_seen_xvendor.jsonl", "trials_seen_gpt55.jsonl"],
-    "seen_defended":    ["trials_seen_defended.jsonl", "trials_seen_defended_xvendor.jsonl", "trials_seen_defended_gpt55.jsonl"],
+    "heldout":          [f"trials_heldout{v}.jsonl" for v in _VENDORS],
+    "heldout_defended": [f"trials_heldout_defended{v}.jsonl" for v in _VENDORS],
+    "seen":             [f"trials_seen{v}.jsonl" for v in _VENDORS],
+    "seen_defended":    [f"trials_seen_defended{v}.jsonl" for v in _VENDORS],
 }
 
 
