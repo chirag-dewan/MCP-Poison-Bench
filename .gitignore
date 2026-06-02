@@ -7,6 +7,6 @@ CLAUDE.md
 results/*.jsonl
 results/*.csv
 results/*.log
-results/DECIRC_RESULTS.md
+results/*.md
 results/spotcheck/
 !results/.gitkeep
