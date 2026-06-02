@@ -194,12 +194,19 @@ def _complete_openai_compatible(
         for t in tools
     ]
     oai_messages = _anthropic_to_openai_messages(system, messages)
+    # GPT-5 / o-series reject the legacy `max_tokens` and require
+    # `max_completion_tokens`; gpt-4o* and DeepSeek still take `max_tokens`.
+    token_param = (
+        "max_completion_tokens"
+        if model.startswith(("gpt-5", "o1", "o3", "o4"))
+        else "max_tokens"
+    )
     resp = client.chat.completions.create(
         model=model,
-        max_tokens=max_tokens,
         temperature=temperature,
         tools=oai_tools,
         messages=oai_messages,
+        **{token_param: max_tokens},
     )
     choice = resp.choices[0]
     blocks: list[dict[str, Any]] = []
