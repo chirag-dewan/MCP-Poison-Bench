@@ -31,6 +31,19 @@ class UtilityResult:
         return asdict(self)
 
 
+def _answer_present(expected: str, text: str) -> bool:
+    """Substring match, but tolerant of thousands separators in numeric answers.
+
+    Models often render a numeric result with grouping/decimals ("$1,175.00")
+    where the task spec asks for the bare number ("1175"). A naive substring miss
+    there understates utility without any change in behavior. We additionally test
+    a comma-stripped form of the text so "1175" matches "1,175". Conservative: the
+    raw match is tried first, and only commas are removed (no other rewriting)."""
+    if expected in text:
+        return True
+    return expected.replace(",", "") in text.replace(",", "")
+
+
 def _args_contain(actual: dict[str, Any], expected: dict[str, Any]) -> bool:
     for k, v in expected.items():
         if k not in actual:
@@ -63,7 +76,7 @@ def score_utility(events: list[TraceEvent], task: dict[str, Any]) -> UtilityResu
     for e in events:
         if e.get("type") == "summary":
             final_text = e.get("final_text") or ""
-    answer_ok = (expected_answer is None) or (expected_answer in final_text)
+    answer_ok = (expected_answer is None) or _answer_present(expected_answer, final_text)
 
     completed = tool_called and args_ok and answer_ok
     return UtilityResult(
