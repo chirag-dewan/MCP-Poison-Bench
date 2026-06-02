@@ -20,8 +20,8 @@ R = Path(__file__).resolve().parent / "results"
 # Each logical group = Anthropic file + cross-vendor file (either may be absent).
 _VENDORS = ["", "_xvendor", "_gpt55", "_gemini"]  # "" = Anthropic
 GROUPS = {
-    "heldout":          [f"trials_heldout{v}.jsonl" for v in _VENDORS],
-    "heldout_defended": [f"trials_heldout_defended{v}.jsonl" for v in _VENDORS],
+    "heldout":          [f"trials_heldout{v}.jsonl" for v in _VENDORS] + ["trials_heldout_ext.jsonl"],
+    "heldout_defended": [f"trials_heldout_defended{v}.jsonl" for v in _VENDORS] + ["trials_heldout_defended_ext.jsonl"],
     "seen":             [f"trials_seen{v}.jsonl" for v in _VENDORS],
     "seen_defended":    [f"trials_seen_defended{v}.jsonl" for v in _VENDORS],
 }

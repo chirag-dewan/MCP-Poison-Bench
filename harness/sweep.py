@@ -73,8 +73,11 @@ def _build_trial_specs(cfg: dict[str, Any]) -> list[dict[str, Any]]:
         if not clients.has_api_key(model):
             print(f"  skip {model}: {clients.key_env_for(model)} not set")
             continue
+        only_ids = set(cfg.get("payload_ids") or [])
         for attack_class, task_rels in class_tasks.items():
             payloads = iter_payloads(attack_class, set_name)
+            if only_ids:  # run a specific subset (e.g. the register-widening batch)
+                payloads = [p for p in payloads if p.id in only_ids]
             servers = [benign, poisoned] if attack_class == "cross_server" else [poisoned]
             for task_rel in task_rels:
                 task = _load_task(task_rel)
