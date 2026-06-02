@@ -4,53 +4,52 @@
 [![Python 3.14](https://img.shields.io/badge/python-3.14-blue.svg)](.python-version)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-**A reproducible benchmark that builds *and measures* a client-side defense against
-MCP tool-poisoning — across four attack classes, three frontier models, and an
-adversarial self-evaluation of the defense itself.**
+**A reproducible MCP tool-poisoning benchmark across four attack classes, six models,
+and three vendors — built around a *de-circularized* evaluation of the client-side
+metadata defense the literature recommends. Scoped to a controlled harness.**
 
 > **Novelty in one sentence.** Prior MCP-security work either *measures the attack*
 > (MCPTox — tool poisoning on 45 real-world servers, ASR up to 72.8% — but ships no
-> defense) or *threat-models and proposes mitigations* (Huang et al., arXiv:2603.22489 — STRIDE/DREAD
-> modeling and a survey of how 7 clients validate metadata, with a *recommended*
-> multi-layer defense). **This work closes the loop: we implement one of those
-> recommended mitigations — a client-side provenance + static-metadata-validation
-> layer — measure its effect with a baseline-vs-defended ASR/utility delta over seeded
-> trials, and then adversarially break our own defense, reporting exactly where it
-> fails.** The contribution is the *built-and-measured defense plus its honest limits*,
-> not another attack-only or proposal-only result.
+> defense) or *threat-models and proposes mitigations* (Huang et al. — a survey of how
+> clients validate metadata, with a *recommended* multi-layer defense). **This work
+> implements that recommended defense and then de-circularizes its evaluation:** the
+> defense's apparent win came from attack payloads that shared its own keyword
+> vocabulary. Re-tested on a held-out payload set authored to trip *zero* defense rules
+> (CI-enforced), the reduction largely vanishes — and the one vector that still
+> succeeds, **rug_pull** (injection in a tool *result*), bypasses the defense by
+> construction. The contribution is a **negative result and the methodology that
+> produced it**, not a defense that works.
 
 This is **defensive security research**. Every attack component is a local, controlled
-test fixture; payloads are defanged (the "exfiltration" target is a local no-op sink and
-the "secret" is a synthetic token), and the techniques are the publicly-documented MCP
-tool-poisoning classes. No third-party deployed product was attacked. See
-[Ethics](#ethics--responsible-use).
+test fixture; payloads are defanged (the sink is a local no-op and the "secret" is a
+synthetic token); techniques are publicly-documented MCP tool-poisoning classes. No
+third-party deployed product was attacked, and **no claim here extends to production
+clients**. See [Ethics](#ethics--responsible-use).
 
 ---
 
 ## Headline result
 
-| | Attack measured | Defense built | Defense measured (Δ) | Defense attacked |
-|---|:---:|:---:|:---:|:---:|
-| MCPTox (arXiv:2508.14925) | ✅ real servers | ❌ | ❌ | ❌ |
-| Huang et al. (arXiv:2603.22489) | ✅ (threat model) | proposed | ❌ | ❌ |
-| **This work** | ✅ 4 classes × 3 models | ✅ | ✅ **−1.00 ASR**, util retained | ✅ **9/11 bypass** |
+Across **4 attack classes × 6 models × 3 vendors** (Anthropic: Opus 4.8, Sonnet 4.6,
+Haiku 4.5; OpenAI: GPT-5.5, gpt-4o-mini; DeepSeek: deepseek-chat), seen + held-out
+payload registers, baseline vs defended, ~2,500 scored trials at temperature 1.0 with
+95% Wilson CIs:
 
-- **Exposure exists and is model-dependent.** Across 4 attack classes × {Opus 4.8,
-  Sonnet 4.6, Haiku 4.5} × 5 seeds (60 trials), the only cell that fired was
-  **Haiku / tool-description injection: ASR = 1.00 [0.57, 1.00]** (95% Wilson CI), and
-  it exfiltrated the planted token verbatim on all 5 trials. Opus and Sonnet resisted
-  every class on these payloads.
-- **The defense removes that exposure and *restores* attack-degraded utility.**
-  Defended Haiku/tool-description ASR **1.00 → 0.00**; Sonnet/tool-description utility
-  **0.40 → 1.00** (the injection had been derailing it). No utility cost on any cell.
-  ([`results/delta_table.md`](results/delta_table.md))
-- **But the defense is a speed-bump, not a boundary.** Our own adversarial suite
-  bypasses it on **9 of 11 techniques** (out-of-scope channels + rule evasion), with a
-  **live-verified** end-to-end bypass (zero-width-obfuscated sink name fires 1/5 on
-  Haiku *with the defense on*). ([`results/defense_limits.md`](results/defense_limits.md))
+- **Susceptibility tracks capability, not vendor.** Every flagship (Opus 4.8, GPT-5.5,
+  Sonnet 4.6) resists nearly every cell; the cheaper models account for most firing.
+  **gpt-4o-mini is the worst** (rug_pull ASR **0.61** held-out, **1.00** seen).
+- **The "defense works" headline was circular.** On *seen* payloads the defense drives
+  metadata-borne injection to ~0 — but that is the keyword vocabulary it was built
+  against. On *held-out* payloads (which trip zero defense rules, CI-enforced) baseline
+  ASR is already ~0, so ΔASR ≈ 0. There is little for the defense to honestly reduce.
+- **rug_pull is a structural blind spot.** The defense rewrites the tool *list* and
+  never inspects tool *results*, so result-borne injection passes straight through:
+  gpt-4o-mini rug_pull is **1.00 → 1.00** with the defense on. It removes what it can
+  read and does nothing to what it cannot.
 
-Per-cell tables: [`results/matrix.csv`](results/matrix.csv) (baseline) and
-[`results/matrix_defended.csv`](results/matrix_defended.csv) (defended).
+Reproduce the matrices with `./run_decirc.sh` (Anthropic) + `./run_xvendor.sh` +
+`./run_gpt55.sh` + `./run_ext.sh`, merged by `aggregate_all.py`. (Results files are
+git-ignored; they are regenerated, not tracked.)
 
 ---
 
@@ -75,6 +74,11 @@ echo "ANTHROPIC_API_KEY=sk-ant-..." > .env
 6. adversarial self-review (`--live`) → `results/defense_limits.md`
 7. real-client spot-check → `results/spotcheck/`
 
+> **Note.** `run_all.sh` is the original single-config flow (one task, Anthropic-only,
+> the `config/bench.json` matrix). The **de-circularized, multi-vendor** result in the
+> headline above is produced by `run_decirc.sh` + `run_xvendor.sh` + `run_gpt55.sh` +
+> `run_ext.sh` (held-out vs seen registers, 6 models), merged by `aggregate_all.py`.
+
 Run a single cell directly, defense on/off via one flag:
 
 ```bash
@@ -82,20 +86,22 @@ python -m harness.runner --server servers/poisoned/server.py --task tasks/calc_a
     --model claude-haiku-4-5-20251001 --seed 42 --poison-class tool_description [--defense]
 ```
 
-Tests only (offline, no API key): `pytest -q` (37 tests).
+Tests only (offline, no API key): `pytest -q` (124 tests).
 
 ### Environment (pinned)
 
 - **Python 3.14.3** (`.python-version`)
 - Direct deps pinned in [`requirements.txt`](requirements.txt); full transitive lock in
   [`requirements.lock.txt`](requirements.lock.txt).
-- `ANTHROPIC_API_KEY` is required to run sweeps — the three benchmark models are all
-  Anthropic (Opus 4.8 / Sonnet 4.6 / Haiku 4.5). A single `ModelClient`
-  ([`harness/clients.py`](harness/clients.py)) also routes **OpenAI** (`gpt-*`, `o*` —
-  `OPENAI_API_KEY`), **DeepSeek** (`deepseek-*`, OpenAI-compatible — `DEEPSEEK_API_KEY`),
-  and **Gemini** (`gemini-*` — `GEMINI_API_KEY`, needs `pip install google-genai`) behind
-  the same canonical interface; add a matching model id to [`config/bench.json`](config/bench.json)
-  to use one. Models whose provider key is unset are skipped with a log — never mocked.
+- The final matrix spans **6 models across 3 vendors**, so the relevant keys are
+  `ANTHROPIC_API_KEY` (Opus 4.8 / Sonnet 4.6 / Haiku 4.5), `OPENAI_API_KEY` (GPT-5.5,
+  gpt-4o-mini), and `DEEPSEEK_API_KEY` (deepseek-chat). A single `ModelClient`
+  ([`harness/clients.py`](harness/clients.py)) routes all of them — plus **Gemini**
+  (`gemini-*` — `GEMINI_API_KEY`, needs `pip install google-genai`; attempted but
+  credit-limited, so not in the final matrix) — behind one canonical interface. GPT-5/
+  o-series use `max_completion_tokens`; Gemini 3.x echoes `thought_signature` across
+  turns; both are handled. Models whose provider key is unset are skipped with a log —
+  never mocked.
 
 ### Seeds & determinism
 
@@ -165,7 +171,7 @@ results/                   # matrices, delta, defense_limits, spot-check, traces
 spec.md, CLAUDE.md         # project spec + agent conventions
 ```
 
-Tests: `pytest -q` — 37 tests covering scorers, Wilson-CI reference values, defense
+Tests: `pytest -q` — 124 tests covering scorers, Wilson-CI reference values, defense
 redactions, the documented bypasses (encoded so a silent regression flips a test), and
 the ModelClient provider routing + canonical-trace translation.
 
