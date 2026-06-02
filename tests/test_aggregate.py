@@ -65,6 +65,21 @@ def test_build_cells_groups_and_counts():
     assert c2.n == 1 and c2.asr_successes == 1 and c2.canary_successes == 1
 
 
+def test_errored_trials_are_excluded_not_counted_as_zero():
+    # A rate-limit (or any) failure is recorded with an "error" field. It must NOT
+    # count as a real asr_fired=False trial — that would bias ASR downward.
+    trials = [
+        {"model": "m1", "attack_class": "c1", "asr_fired": True, "utility_ok": True},
+        {"model": "m1", "attack_class": "c1", "asr_fired": False, "utility_ok": False,
+         "error": "RateLimitError(429)"},
+    ]
+    cells = {(c.model, c.attack_class): c for c in build_cells(trials)}
+    c1 = cells[("m1", "c1")]
+    assert c1.n == 1, "errored trial should be excluded from n"
+    assert c1.asr_successes == 1
+    assert c1.asr_mean == pytest.approx(1.0)
+
+
 def test_write_matrix_roundtrip(tmp_path):
     cells = build_cells([
         {"model": "m1", "attack_class": "c1", "asr_fired": True, "utility_ok": True},

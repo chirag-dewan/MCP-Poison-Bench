@@ -59,6 +59,7 @@ class Cell:
     asr_successes: int
     util_successes: int
     canary_successes: int
+    task_id: str = ""  # set only when cells are grouped by task (--by-task)
 
     @property
     def asr_mean(self) -> float:
@@ -87,28 +88,47 @@ def load_trials(path: str | Path = TRIALS_PATH) -> list[dict[str, Any]]:
         return [json.loads(line) for line in fh if line.strip()]
 
 
-def build_cells(trials: list[dict[str, Any]]) -> list[Cell]:
-    """Group trials into (model, attack_class) cells, summing successes."""
-    buckets: dict[tuple[str, str], Cell] = {}
+def build_cells(trials: list[dict[str, Any]], by_task: bool = False) -> list[Cell]:
+    """Group trials into cells, summing successes.
+
+    Default key is (model, attack_class) — the headline matrix, aggregating over
+    payloads/tasks/seeds. With `by_task=True` the key is (model, attack_class,
+    task_id), so a class running on more than one task is split per task.
+    """
+    buckets: dict[tuple[str, ...], Cell] = {}
     for t in trials:
-        key = (t["model"], t["attack_class"])
+        # A trial that errored out (e.g. a rate-limit failure after all retries)
+        # is NOT a measurement — it never observed model behavior. Counting it as
+        # asr_fired=False would launder API failures into false "attack didn't
+        # fire" data, biasing ASR down. Exclude it from every cell.
+        if t.get("error"):
+            continue
+        task_id = t.get("task_id", "") if by_task else ""
+        key = (t["model"], t["attack_class"], task_id)
         cell = buckets.get(key)
         if cell is None:
-            cell = Cell(t["model"], t["attack_class"], 0, 0, 0, 0)
+            cell = Cell(t["model"], t["attack_class"], 0, 0, 0, 0, task_id=task_id)
             buckets[key] = cell
         cell.n += 1
         cell.asr_successes += int(bool(t["asr_fired"]))
         cell.util_successes += int(bool(t["utility_ok"]))
         cell.canary_successes += int(bool(t.get("canary_exfiltrated")))
-    return sorted(buckets.values(), key=lambda c: (c.model, c.attack_class))
+    return sorted(buckets.values(), key=lambda c: (c.model, c.attack_class, c.task_id))
 
 
-def write_matrix(cells: list[Cell], path: str | Path = MATRIX_PATH) -> Path:
-    """Write the benchmark matrix CSV. One row per (model, attack_class) cell."""
+def write_matrix(
+    cells: list[Cell], path: str | Path = MATRIX_PATH, include_task: bool = False,
+) -> Path:
+    """Write the benchmark matrix CSV. One row per cell.
+
+    `include_task` adds a `task_id` column (use with cells from
+    `build_cells(..., by_task=True)`); default keeps the headline schema.
+    """
     path = Path(path).resolve()
     path.parent.mkdir(exist_ok=True)
-    fields = [
-        "model", "attack_class", "n",
+    lead = ["model", "attack_class"] + (["task_id"] if include_task else [])
+    fields = lead + [
+        "n",
         "asr_mean", "asr_ci_low", "asr_ci_high",
         "utility_mean", "utility_ci_low", "utility_ci_high",
         "canary_exfil_mean",
@@ -119,41 +139,51 @@ def write_matrix(cells: list[Cell], path: str | Path = MATRIX_PATH) -> Path:
         for c in cells:
             a_lo, a_hi = c.asr_ci()
             u_lo, u_hi = c.utility_ci()
-            w.writerow([
-                c.model, c.attack_class, c.n,
+            row = [c.model, c.attack_class] + ([c.task_id] if include_task else [])
+            row += [
+                c.n,
                 f"{c.asr_mean:.4f}", f"{a_lo:.4f}", f"{a_hi:.4f}",
                 f"{c.utility_mean:.4f}", f"{u_lo:.4f}", f"{u_hi:.4f}",
                 f"{c.canary_mean:.4f}",
-            ])
+            ]
+            w.writerow(row)
     return path
 
 
 def aggregate(
     trials_path: str | Path = TRIALS_PATH, matrix_path: str | Path = MATRIX_PATH,
+    by_task: bool = False,
 ) -> tuple[list[Cell], Path]:
-    cells = build_cells(load_trials(trials_path))
-    out = write_matrix(cells, matrix_path)
+    cells = build_cells(load_trials(trials_path), by_task=by_task)
+    out = write_matrix(cells, matrix_path, include_task=by_task)
     return cells, out
 
 
 def build_delta(
     baseline_path: str | Path = TRIALS_PATH,
     defended_path: str | Path = TRIALS_DEFENDED_PATH,
+    by_task: bool = False,
 ) -> list[dict[str, Any]]:
     """Join baseline and defended cells into per-cell delta rows.
 
-    Rows are keyed by (model, attack_class). ASR/utility deltas are defended
-    minus baseline (negative ASR delta == the defense reduced attack success).
+    Rows are keyed by (model, attack_class[, task_id]). ASR/utility deltas are
+    defended minus baseline (negative ASR delta == the defense reduced attack
+    success).
     """
-    base = {(c.model, c.attack_class): c for c in build_cells(load_trials(baseline_path))}
-    deff = {(c.model, c.attack_class): c for c in build_cells(load_trials(defended_path))}
+    def _key(c: Cell) -> tuple[str, ...]:
+        return (c.model, c.attack_class, c.task_id) if by_task else (c.model, c.attack_class)
+
+    base = {_key(c): c for c in build_cells(load_trials(baseline_path), by_task=by_task)}
+    deff = {_key(c): c for c in build_cells(load_trials(defended_path), by_task=by_task)}
     keys = sorted(set(base) | set(deff))
     rows: list[dict[str, Any]] = []
-    for model, attack_class in keys:
-        b, d = base.get((model, attack_class)), deff.get((model, attack_class))
+    for key in keys:
+        model, attack_class = key[0], key[1]
+        b, d = base.get(key), deff.get(key)
         row = {
             "model": model,
             "attack_class": attack_class,
+            "task_id": (key[2] if by_task else ""),
             "n_baseline": b.n if b else 0,
             "n_defended": d.n if d else 0,
             "asr_baseline": b.asr_mean if b else None,
@@ -170,13 +200,14 @@ def build_delta(
 def write_delta_csv(rows: list[dict[str, Any]], path: str | Path = DELTA_CSV_PATH) -> Path:
     path = Path(path)
     path.parent.mkdir(exist_ok=True)
-    fields = [
-        "model", "attack_class", "n_baseline", "n_defended",
+    has_task = any(r.get("task_id") for r in rows)
+    fields = ["model", "attack_class"] + (["task_id"] if has_task else []) + [
+        "n_baseline", "n_defended",
         "asr_baseline", "asr_defended", "asr_delta",
         "utility_baseline", "utility_defended", "utility_delta",
     ]
     with path.open("w", newline="", encoding="utf-8") as fh:
-        w = csv.DictWriter(fh, fieldnames=fields)
+        w = csv.DictWriter(fh, fieldnames=fields, extrasaction="ignore")
         w.writeheader()
         for r in rows:
             w.writerow({
@@ -192,15 +223,19 @@ def _fmt(v: Any) -> str:
 def write_delta_md(rows: list[dict[str, Any]], path: str | Path = DELTA_MD_PATH) -> Path:
     path = Path(path)
     path.parent.mkdir(exist_ok=True)
+    has_task = any(r.get("task_id") for r in rows)
+    task_h = "task | " if has_task else ""
+    task_sep = "---|" if has_task else ""
     header = (
-        "| model | attack_class | n | ASR base | ASR def | ΔASR | "
+        f"| model | attack_class | {task_h}n | ASR base | ASR def | ΔASR | "
         "util base | util def | Δutil |\n"
-        "|---|---|---|---|---|---|---|---|---|\n"
+        f"|---|---|{task_sep}---|---|---|---|---|---|---|\n"
     )
     lines = []
     for r in rows:
+        task_c = f"{r['task_id']} | " if has_task else ""
         lines.append(
-            f"| {r['model']} | {r['attack_class']} | {r['n_baseline']} | "
+            f"| {r['model']} | {r['attack_class']} | {task_c}{r['n_baseline']} | "
             f"{_fmt(r['asr_baseline'])} | {_fmt(r['asr_defended'])} | "
             f"{_fmt(r['asr_delta'])} | {_fmt(r['utility_baseline'])} | "
             f"{_fmt(r['utility_defended'])} | {_fmt(r['utility_delta'])} |"
@@ -247,12 +282,14 @@ def main() -> None:
                         help="output matrix CSV path")
     parser.add_argument("--delta", action="store_true",
                         help="emit the baseline-vs-defended delta table instead")
+    parser.add_argument("--by-task", action="store_true",
+                        help="split cells per task_id (adds a task_id column)")
     parser.add_argument("--baseline", type=Path, default=TRIALS_PATH)
     parser.add_argument("--defended", type=Path, default=TRIALS_DEFENDED_PATH)
     args = parser.parse_args()
 
     if args.delta:
-        rows = build_delta(args.baseline, args.defended)
+        rows = build_delta(args.baseline, args.defended, by_task=args.by_task)
         if not rows:
             print("no trials to compare — run baseline and defended sweeps first.")
             return
@@ -262,7 +299,7 @@ def main() -> None:
         print(f"\nwrote {csv_out.relative_to(REPO_ROOT)} and {md_out.relative_to(REPO_ROOT)}")
         return
 
-    cells, out = aggregate(args.trials, args.matrix)
+    cells, out = aggregate(args.trials, args.matrix, by_task=args.by_task)
     if not cells:
         print(f"no trials found at {args.trials} — run the sweep first.")
         return
