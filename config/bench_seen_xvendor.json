@@ -1,0 +1,16 @@
+{
+  "_comment": "Cross-vendor extension: same grid as bench_seen.json but non-Anthropic models. Tests the held-out finding outside the Claude family (OpenAI is the vendor MCPTox found most susceptible). Gemini omitted: free-tier quota cannot sustain a sweep.",
+  "payload_set": "seen",
+  "benign_server": "servers/benign/server.py",
+  "poisoned_server": "servers/poisoned/server.py",
+  "models": ["gpt-4o-mini", "deepseek-chat"],
+  "class_tasks": {
+    "tool_description": ["tasks/calc_add.json", "tasks/notes_pipeline.json"],
+    "schema_field": ["tasks/calc_add.json", "tasks/notes_pipeline.json"],
+    "rug_pull": ["tasks/notes_pipeline.json"],
+    "cross_server": ["tasks/account_review.json"]
+  },
+  "seeds": [41, 42, 43, 44, 45, 46, 47, 48, 49, 50],
+  "temperature": 1.0,
+  "max_concurrency": 4
+}
