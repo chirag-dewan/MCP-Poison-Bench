@@ -6,5 +6,6 @@ __pycache__/
 CLAUDE.md
 results/*.jsonl
 results/*.csv
+results/*.log
 results/spotcheck/
 !results/.gitkeep
