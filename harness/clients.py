@@ -307,8 +307,16 @@ def _anthropic_to_gemini_contents(messages: list[dict[str, Any]]) -> list[dict[s
                     parts.append({"text": b["text"]})
                 elif b.get("type") == "tool_use":
                     id_to_name[b["id"]] = b["name"]
-                    parts.append({"function_call": {"name": b["name"],
-                                                    "args": b.get("input", {})}})
+                    fc_part: dict[str, Any] = {
+                        "function_call": {"name": b["name"], "args": b.get("input", {})}}
+                    # Gemini 3.x requires the original thought_signature to be echoed
+                    # back on the function_call part, or the next turn 400s. We stash
+                    # it (base64) on the canonical block when parsing the response.
+                    ts = b.get("_gemini_thought_signature")
+                    if ts:
+                        import base64
+                        fc_part["thought_signature"] = base64.b64decode(ts)
+                    parts.append(fc_part)
             contents.append({"role": "model", "parts": parts})
         else:  # user turn carrying tool_result blocks
             parts = []
@@ -370,12 +378,19 @@ def _complete_gemini(
             blocks.append({"type": "text", "text": part.text})
         fc = getattr(part, "function_call", None)
         if fc is not None:
-            blocks.append({
+            block = {
                 "type": "tool_use",
                 "id": f"gemini-{fc.name}-{n_calls}",   # synthesized; Gemini has none
                 "name": fc.name,
                 "input": dict(fc.args or {}),
-            })
+            }
+            # Preserve the thought_signature (Gemini 3.x) so it can be echoed back
+            # on the next turn; base64 so the canonical block stays JSON-safe.
+            ts = getattr(part, "thought_signature", None)
+            if ts:
+                import base64
+                block["_gemini_thought_signature"] = base64.b64encode(ts).decode()
+            blocks.append(block)
             n_calls += 1
     stop = "tool_use" if n_calls else "end_turn"
     um = getattr(resp, "usage_metadata", None)
