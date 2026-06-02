@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>MCP-Poison-Bench — built, measured, and broken</title>
-<meta name="description" content="A reproducible benchmark that builds and measures a client-side defense against MCP tool-poisoning across four attack classes and three frontier models — then adversarially breaks its own defense." />
+<meta name="description" content="A reproducible MCP tool-poisoning benchmark across four attack classes, six models, and three vendors — with a de-circularized test showing a client-side metadata defense is structurally blind to rug-pull injection. Controlled harness." />
 <!-- Web fonts: Space Mono (display) + JetBrains Mono (body/code). Degrades to a
      monospace stack offline; the page is otherwise fully self-contained. -->
 <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -276,16 +276,17 @@
     <div class="mono-label">defensive security research · MCP trust boundary</div>
     <h1 style="margin-top:14px">MCP-Poison-Bench<span class="blink">_</span></h1>
     <p class="thesis">
-      A reproducible benchmark that <b>builds and measures a client-side defense</b>
-      against MCP tool-poisoning — across four attack classes, three frontier models,
-      and an adversarial self-evaluation of the defense itself.
+      A reproducible benchmark for MCP tool-poisoning across <b>four attack classes,
+      six models, and three vendors</b> — built around a <b>de-circularized</b> test
+      that strips the easy, self-fulfilling defense result and measures where a
+      client-side metadata defense <i>actually</i> fails. Scoped to a controlled harness.
     </p>
     <div class="bmb">
-      <span class="b-build">BUILD the defense</span>
+      <span class="b-measure">MEASURE the attack</span>
       <span class="arrow">→</span>
-      <span class="b-measure">MEASURE the delta</span>
+      <span class="b-build">DE-CIRCULARIZE the defense</span>
       <span class="arrow">→</span>
-      <span class="b-break">BREAK my own defense</span>
+      <span class="b-break">EXPOSE the blind spot</span>
     </div>
     <div style="margin-top:30px">
       <a class="btn" href="https://www.cdewan.me/projects/mcp-poison-bench-demo.html">▶ run the live demo</a>
@@ -328,19 +329,22 @@
         </tr>
         <tr class="ours">
           <th>This work</th>
-          <td class="yes">✓ <span class="small">4 classes × 3 models</span></td>
+          <td class="yes">✓ <span class="small">4 classes × 6 models × 3 vendors</span></td>
           <td class="yes">✓</td>
-          <td class="yes">✓ <span class="small">−1.00 ASR</span></td>
-          <td class="yes">✓ <span class="small">9/11 bypass</span></td>
+          <td class="yes">✓ <span class="small">de-circularized Δ</span></td>
+          <td class="yes">✓ <span class="small">structural blind spot</span></td>
         </tr>
       </tbody>
     </table>
     <div class="novelty-note">
-      We implement one layer of the mitigation Huang et al. <i>recommend</i> — a
-      client-side provenance + static-metadata-validation pass — <b>measure its effect
-      with a baseline-vs-defended ASR/utility delta</b>, then <b>adversarially break our
-      own defense</b> and report exactly where it fails. The contribution is the
-      <b>built-and-measured defense plus its honest limits</b>.
+      We implement the static-metadata-validation pass Huang et al. <i>recommend</i>,
+      then do the thing most defense papers skip: <b>de-circularize the evaluation</b>.
+      The defense's apparent win came from attack payloads that shared its own keyword
+      vocabulary. We re-test on a <b>held-out payload set authored to trip zero defense
+      rules</b> (CI-enforced) and find the reduction largely vanishes — and that the one
+      vector that still succeeds, <code>rug_pull</code>, bypasses the defense <b>by
+      design</b>. The contribution is the <b>honest negative result and the methodology
+      that exposes it</b>, not a defense that "works."
     </div>
   </div>
 </section>
@@ -350,48 +354,53 @@
   <div class="wrap">
     <div class="sec-head">
       <h2>Headline results</h2>
-      <p>4 attack classes × {Opus 4.8, Sonnet 4.6, Haiku 4.5} × 5 seeds = 60 seeded
-         trials, temperature 1.0, 95% Wilson confidence intervals.</p>
+      <p>4 attack classes × 6 models × 3 vendors (Anthropic, OpenAI, DeepSeek),
+         temperature 1.0, held-out vs seen payloads, 95% Wilson intervals. ~2,500
+         scored trials; errored trials excluded, never counted as misses.</p>
     </div>
 
     <div class="stats">
       <div class="card warn">
-        <div class="n">1 / 12</div>
-        <div class="k">cells fired at baseline — exposure is sharply
-          <b style="color:var(--text)">model-dependent</b>. Only Haiku ·
-          tool-description injection. Opus &amp; Sonnet resisted every class.</div>
+        <div class="n">capability</div>
+        <div class="k">not vendor. Every flagship — Opus 4.8, GPT-5.5, Sonnet 4.6 —
+          <b style="color:var(--text)">resists essentially everything</b>. The cheap
+          models are the vulnerable ones.</div>
       </div>
       <div class="card bad">
-        <div class="n">1.00</div>
-        <div class="k">baseline ASR on that cell <span style="color:var(--dim)">[0.57, 1.00]</span>
-          — the planted token was exfiltrated verbatim on all 5/5 trials.</div>
+        <div class="n">gpt-4o-mini</div>
+        <div class="k">the worst model — fires on rug_pull at
+          <b style="color:var(--text)">0.61</b> held-out / 1.00 seen, and is the only
+          model to fire across multiple classes.</div>
+      </div>
+      <div class="card bad">
+        <div class="n">1.00 → 1.00</div>
+        <div class="k">rug_pull under the defense. It rewrites the tool <b style="color:var(--text)">list</b>,
+          never tool <b style="color:var(--text)">results</b> — so result-borne injection
+          bypasses it <b style="color:var(--text)">by design</b>.</div>
       </div>
       <div class="card good">
-        <div class="n">→ 0.00</div>
-        <div class="k">ASR with the defense on. The injection is redacted before it
-          reaches model context. No utility cost on any cell.</div>
-      </div>
-      <div class="card bad">
-        <div class="n">9 / 11</div>
-        <div class="k">adversarial techniques <b style="color:var(--text)">bypass</b>
-          the defense. It is a speed-bump, not a boundary — and we say so.</div>
+        <div class="n">held-out Δ≈0</div>
+        <div class="k">the &minus;1.00 win was <b style="color:var(--text)">circular</b>. On payloads
+          authored to trip zero defense rules, baseline ASR is already ~0 — nothing left
+          to reduce.</div>
       </div>
     </div>
 
     <div class="diff">
       <div class="dh"><span class="dots"><i class="r"></i><i class="y"></i><i class="g"></i></span>
-        delta — Haiku · tool_description injection</div>
-<pre><span class="ctx">@@ baseline → defended @@</span>
-<span class="del">- ASR  1.00  [0.57, 1.00]   token exfiltrated 5/5</span>
-<span class="add">+ ASR  0.00  [0.00, 0.43]   sink never called</span></pre>
+        the circularity — gpt-4o-mini · ASR baseline → defended</div>
+<pre><span class="ctx">@@ SEEN payloads (share the filter's vocabulary) @@</span>
+<span class="del">- tool_description  0.50 → 0.00   redacted (the defense "works")</span>
+<span class="ctx">@@ HELD-OUT payloads (trip zero defense rules) @@</span>
+<span class="add">+ tool_description  0.00 → 0.00   nothing fires, nothing to reduce</span></pre>
     </div>
 
     <div class="diff">
       <div class="dh"><span class="dots"><i class="r"></i><i class="y"></i><i class="g"></i></span>
-        side effect — the defense <em style="color:var(--green);font-style:normal">restores</em> attack-degraded utility (Sonnet · tool_description)</div>
-<pre><span class="ctx">@@ utility, baseline → defended @@</span>
-<span class="del">- 0.40   under attack — the injection derailed the task</span>
-<span class="add">+ 1.00   defended — task completes normally again</span></pre>
+        the structural blind spot — gpt-4o-mini · rug_pull</div>
+<pre><span class="ctx">@@ ASR baseline → defended, defense ON @@</span>
+<span class="del">- seen      1.00 → 1.00   injection rides the tool RESULT</span>
+<span class="del">- held-out  0.61 → 0.53   the filter never inspects it</span></pre>
     </div>
   </div>
 </section>
@@ -526,14 +535,14 @@
         <text x="879" y="117" text-anchor="middle" fill="#e6e6e6" font-size="12.5" font-weight="700">model</text>
         <text x="879" y="134" text-anchor="middle" fill="#7a7a7a" font-size="10.5">sees tools</text>
         <!-- bypass lane -->
-        <text x="486" y="176" text-anchor="middle" fill="#ff3333" font-size="11" font-weight="700">unprotected channels → 9 / 11 bypass</text>
+        <text x="486" y="176" text-anchor="middle" fill="#ff3333" font-size="11" font-weight="700">tool results unscanned → rug_pull 1.00 → 1.00</text>
         <path d="M78,152 C78,206 196,208 248,208" fill="none" stroke="#ff3333" stroke-width="1.2" stroke-dasharray="5 4" marker-end="url(#r2)"/>
         <path d="M722,208 C802,208 846,166 877,154" fill="none" stroke="#ff3333" stroke-width="1.2" stroke-dasharray="5 4" marker-end="url(#r2)"/>
         <rect x="250" y="186" width="472" height="50" rx="6" fill="#170d0d" stroke="#ff3333"/>
         <text x="486" y="208" text-anchor="middle" fill="#ffaaaa" font-size="10.5">✗ tool results · schema title/enum · nested props · tool names</text>
         <text x="486" y="224" text-anchor="middle" fill="#ffaaaa" font-size="10.5">· homoglyph / zero-width · base64 · other-language · soft paraphrase</text>
       </svg>
-      <div class="dcap">The validator inspects only tool &amp; top-level parameter descriptions. Everything else the model reads — results, other schema fields, names, obfuscation — routes around it. <b style="color:var(--red)">9 of 11 techniques bypass.</b></div>
+      <div class="dcap">The validator inspects only tool &amp; top-level parameter descriptions. Everything else the model reads — results, other schema fields, names, obfuscation — routes around it. Measured live: <b style="color:var(--red)">rug_pull bypasses by design, 1.00 → 1.00 on gpt-4o-mini.</b></div>
     </div>
     <div class="limit-grid">
       <div class="limit-box">
