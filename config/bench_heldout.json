@@ -1,0 +1,20 @@
+{
+  "_comment": "De-circularized grid. payload_set='heldout' runs the independently-authored payloads (fixtures.HELDOUT_PAYLOADS) that contain NONE of the defense's trigger strings, so a defended ASR drop here cannot be the filter recognizing its own vocabulary. Each class runs on the task(s) that give it a structural opening (class_tasks). n per (model,class) cell = (#tasks x 5 payloads x #seeds); with 4 seeds that is >=20 on every cell, and 40 on the two metadata classes that run on two tasks.",
+  "payload_set": "heldout",
+  "benign_server": "servers/benign/server.py",
+  "poisoned_server": "servers/poisoned/server.py",
+  "models": [
+    "claude-opus-4-8",
+    "claude-sonnet-4-6",
+    "claude-haiku-4-5-20251001"
+  ],
+  "class_tasks": {
+    "tool_description": ["tasks/calc_add.json", "tasks/notes_pipeline.json"],
+    "schema_field": ["tasks/calc_add.json", "tasks/notes_pipeline.json"],
+    "rug_pull": ["tasks/notes_pipeline.json"],
+    "cross_server": ["tasks/account_review.json"]
+  },
+  "seeds": [41, 42, 43, 44],
+  "temperature": 1.0,
+  "max_concurrency": 3
+}

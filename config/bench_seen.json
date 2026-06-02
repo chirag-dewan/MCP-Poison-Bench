@@ -1,0 +1,20 @@
+{
+  "_comment": "Same grid as bench_heldout.json but payload_set='seen' — the original payloads whose vocabulary overlaps the defense rules. Reported SEPARATELY and labeled 'seen', as the (near-circular) point of comparison: any defended ASR drop on this set may be the filter matching phrasing it was co-designed with. The seen set has 1 payload per class, so n per cell = (#tasks x 1 payload x #seeds).",
+  "payload_set": "seen",
+  "benign_server": "servers/benign/server.py",
+  "poisoned_server": "servers/poisoned/server.py",
+  "models": [
+    "claude-opus-4-8",
+    "claude-sonnet-4-6",
+    "claude-haiku-4-5-20251001"
+  ],
+  "class_tasks": {
+    "tool_description": ["tasks/calc_add.json", "tasks/notes_pipeline.json"],
+    "schema_field": ["tasks/calc_add.json", "tasks/notes_pipeline.json"],
+    "rug_pull": ["tasks/notes_pipeline.json"],
+    "cross_server": ["tasks/account_review.json"]
+  },
+  "seeds": [41, 42, 43, 44, 45, 46, 47, 48, 49, 50],
+  "temperature": 1.0,
+  "max_concurrency": 3
+}
