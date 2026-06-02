@@ -13,14 +13,19 @@ if [[ -f .env ]]; then set -a; source .env; set +a; fi
 R=results
 mkdir -p "$R"
 
-echo "==> [1/4] HELD-OUT baseline"
-"$PYTHON" -m harness.sweep --config config/bench_heldout.json --out "$R/trials_heldout.jsonl"
-echo "==> [2/4] HELD-OUT defended"
-"$PYTHON" -m harness.sweep --config config/bench_heldout.json --defense --out "$R/trials_heldout_defended.jsonl"
-echo "==> [3/4] SEEN baseline"
-"$PYTHON" -m harness.sweep --config config/bench_seen.json --out "$R/trials_seen.jsonl"
-echo "==> [4/4] SEEN defended"
-"$PYTHON" -m harness.sweep --config config/bench_seen.json --defense --out "$R/trials_seen_defended.jsonl"
+# Resumable: skip a sweep whose output already exists (so a mid-run failure or a
+# rerun does not re-spend API budget on completed sweeps). Delete the file to force.
+run_sweep () {  # $1=label  $2=outfile  $3...=sweep args
+  local label="$1" out="$2"; shift 2
+  if [[ -s "$out" ]]; then echo "==> $label  SKIP (exists: $out, $(wc -l < "$out") lines)"; return; fi
+  echo "==> $label"
+  "$PYTHON" -m harness.sweep "$@" --out "$out"
+}
+
+run_sweep "[1/4] HELD-OUT baseline"  "$R/trials_heldout.jsonl"          --config config/bench_heldout.json
+run_sweep "[2/4] HELD-OUT defended"  "$R/trials_heldout_defended.jsonl" --config config/bench_heldout.json --defense
+run_sweep "[3/4] SEEN baseline"      "$R/trials_seen.jsonl"             --config config/bench_seen.json
+run_sweep "[4/4] SEEN defended"      "$R/trials_seen_defended.jsonl"    --config config/bench_seen.json --defense
 
 echo "==> aggregating labeled matrices + deltas"
 "$PYTHON" - <<'PY'

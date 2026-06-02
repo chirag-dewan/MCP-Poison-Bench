@@ -157,6 +157,10 @@ def run_sweep(
     max_workers = int(cfg.get("max_concurrency", 4))
     if out_path is None:
         out_path = TRIALS_DEFENDED_PATH if defense else TRIALS_PATH
+    # Resolve so a relative --out (e.g. results/foo.jsonl) is still under REPO_ROOT
+    # for the final relative_to() display — passing a relative path used to crash
+    # the sweep *after* it had already written every trial.
+    out_path = Path(out_path).resolve()
 
     specs = _build_trial_specs(cfg)
     set_name = cfg.get("payload_set", "seen")
