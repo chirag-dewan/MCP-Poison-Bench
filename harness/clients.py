@@ -52,8 +52,14 @@ def mcp_tools_to_anthropic(tools: list[MCPTool]) -> list[dict[str, Any]]:
 
 
 def get_anthropic_client() -> Anthropic:
-    """Return an Anthropic SDK client. Reads ANTHROPIC_API_KEY from env."""
-    return Anthropic()
+    """Return an Anthropic SDK client. Reads ANTHROPIC_API_KEY from env.
+
+    `max_retries` is well above the SDK default (2): sweeps fan many trials at a
+    low req/min org limit, so 429s are expected and transient. The SDK does
+    exponential backoff honoring the `retry-after` header, so a high retry count
+    turns rate-limit pressure into slower (not failed, not silently-zeroed) runs.
+    """
+    return Anthropic(max_retries=8)
 
 
 def provider_for(model: str) -> str:
