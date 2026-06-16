@@ -50,6 +50,13 @@ MAX_TOKENS = 1024
 #: it. Signature: (list[anthropic_tool_dict]) -> list[anthropic_tool_dict].
 ToolTransform = Callable[[list[dict[str, Any]]], list[dict[str, Any]]]
 
+#: An optional live capture hook. The runner calls it with each trace event
+#: (already JSON-serialized, identical to the on-disk line) at the moment the
+#: event is written, so downstreams can observe runs in real time without
+#: re-reading the trace file. Used by the mcp-telemetry sibling project to stamp
+#: true per-call timestamps and capture full, untruncated tool results live.
+EventHook = Callable[[dict[str, Any]], None]
+
 
 def _git_sha() -> str:
     try:
@@ -82,15 +89,24 @@ def _serialize(obj: Any) -> Any:
 
 
 class TraceWriter:
-    """Append-only JSONL writer for run traces."""
+    """Append-only JSONL writer for run traces.
 
-    def __init__(self, path: Path) -> None:
+    If `on_event` is supplied, every written event is also handed to it live
+    (after the same JSON serialization used for the file), so observers see the
+    full, untruncated event the instant it is recorded.
+    """
+
+    def __init__(self, path: Path, on_event: EventHook | None = None) -> None:
         self.path = path
         self._fh = path.open("w", encoding="utf-8")
+        self._on_event = on_event
 
     def write(self, event: dict[str, Any]) -> None:
-        self._fh.write(json.dumps(_serialize(event), ensure_ascii=False) + "\n")
+        payload = _serialize(event)
+        self._fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
         self._fh.flush()
+        if self._on_event is not None:
+            self._on_event(payload)
 
     def close(self) -> None:
         self._fh.close()
@@ -250,18 +266,22 @@ def run_trial(
     extra_config: dict[str, Any] | None = None,
     results_dir: Path = RESULTS_DIR,
     tool_transform: ToolTransform | None = None,
+    on_event: EventHook | None = None,
 ) -> tuple[dict[str, Any], Path]:
     """Run one trial end to end (own event loop) and return (summary, trace_path).
 
     Used by the sweep driver; each call is isolated (fresh servers + loop), so it
     is safe to invoke concurrently from a thread pool.
+
+    `on_event`, if given, receives every trace event live (see EventHook); the
+    trace file is still written exactly as before.
     """
     random.seed(seed)
     results_dir.mkdir(exist_ok=True)
     stamp = _utc_stamp()
     suffix = f"-{extra_config.get('attack_class')}" if extra_config else ""
     trace_path = results_dir / f"{stamp}-{task['id']}{suffix}-{model}-seed{seed}.jsonl"
-    trace = TraceWriter(trace_path)
+    trace = TraceWriter(trace_path, on_event=on_event)
     trace.write({
         "type": "run_config",
         "task_id": task["id"],
