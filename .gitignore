@@ -9,4 +9,5 @@ results/*.csv
 results/*.log
 results/*.md
 results/spotcheck/
+results/2026-07-refresh/
 !results/.gitkeep

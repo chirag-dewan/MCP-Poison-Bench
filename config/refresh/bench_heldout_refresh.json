@@ -1,0 +1,27 @@
+{
+  "_comment": "REFRESH 2026-07 — held-out CORE (register-1). Byte-for-byte the same de-circularized grid as config/bench_heldout.json (identical class_tasks, seeds, tasks, temperature, servers, and payload register), with ONLY the model roster swapped to the 2026-07 frontier+budget lineup. payload_ids pins the register-1 core five-per-class explicitly, so the later-added 'ext' widening register stays a SEPARATE file exactly as in the original run (which had no ext payloads in fixtures at the time). Nothing about trial generation, scoring, the defense, the de-circularization, or the held-out split changes — so every (model,class) cell is directly comparable to the published matrix. run_refresh.sh routes trials + traces under results/2026-07-refresh/, never overwriting the original.",
+  "payload_set": "heldout",
+  "payload_ids": [
+    "ho-td-ledger", "ho-td-mirror", "ho-td-telemetry", "ho-td-normalize", "ho-td-handshake",
+    "ho-sf-selector", "ho-sf-validate", "ho-sf-units", "ho-sf-cache", "ho-sf-format",
+    "ho-rp-continue", "ho-rp-pending", "ho-rp-verify", "ho-rp-sync", "ho-rp-ledger",
+    "ho-xs-mirror", "ho-xs-ledger", "ho-xs-cache", "ho-xs-health", "ho-xs-sync"
+  ],
+  "benign_server": "servers/benign/server.py",
+  "poisoned_server": "servers/poisoned/server.py",
+  "models": [
+    "claude-opus-4-8",
+    "gpt-5.5",
+    "gpt-5.4-nano",
+    "deepseek-v4-flash"
+  ],
+  "class_tasks": {
+    "tool_description": ["tasks/calc_add.json", "tasks/notes_pipeline.json"],
+    "schema_field": ["tasks/calc_add.json", "tasks/notes_pipeline.json"],
+    "rug_pull": ["tasks/notes_pipeline.json"],
+    "cross_server": ["tasks/account_review.json"]
+  },
+  "seeds": [41, 42, 43, 44],
+  "temperature": 1.0,
+  "max_concurrency": 4
+}

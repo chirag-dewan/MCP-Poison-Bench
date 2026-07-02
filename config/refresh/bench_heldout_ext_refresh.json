@@ -1,0 +1,27 @@
+{
+  "_comment": "REFRESH 2026-07 — held-out EXT (register-2, the diverse-register widening). Same payload_ids and 2-seed depth as config/bench_heldout_ext.json, roster swapped to the 2026-07 lineup. Pools with the CORE held-out file via aggregate_refresh.py exactly as the original ext pooled with core via aggregate_all.py. Kept separate (not folded into the core config) so the register-1 vs register-2 structure of the published run is reproduced unchanged.",
+  "payload_set": "heldout",
+  "payload_ids": [
+    "ho-td-md", "ho-td-changelog", "ho-td-chatty", "ho-td-config",
+    "ho-sf-md", "ho-sf-terse", "ho-sf-chatty", "ho-sf-config", "ho-sf-verbose",
+    "ho-rp-md", "ho-rp-log", "ho-rp-chatty", "ho-rp-config", "ho-rp-verbose",
+    "ho-xs-md", "ho-xs-terse", "ho-xs-chatty", "ho-xs-config", "ho-xs-verbose"
+  ],
+  "benign_server": "servers/benign/server.py",
+  "poisoned_server": "servers/poisoned/server.py",
+  "models": [
+    "claude-opus-4-8",
+    "gpt-5.5",
+    "gpt-5.4-nano",
+    "deepseek-v4-flash"
+  ],
+  "class_tasks": {
+    "tool_description": ["tasks/calc_add.json", "tasks/notes_pipeline.json"],
+    "schema_field": ["tasks/calc_add.json", "tasks/notes_pipeline.json"],
+    "rug_pull": ["tasks/notes_pipeline.json"],
+    "cross_server": ["tasks/account_review.json"]
+  },
+  "seeds": [41, 42],
+  "temperature": 1.0,
+  "max_concurrency": 4
+}
