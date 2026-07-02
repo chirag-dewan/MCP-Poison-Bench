@@ -1,0 +1,21 @@
+{
+  "_comment": "REFRESH 2026-07 — SEEN register (near-circular contrast). Byte-for-byte the same grid as config/bench_seen.json (one seen payload per class, 10 seeds, identical class_tasks/tasks/temperature), roster swapped to the 2026-07 lineup. Reported SEPARATELY and labeled 'seen', exactly as in the published run. Trial generation, scoring, defense, and the seen/held-out separation are unchanged.",
+  "payload_set": "seen",
+  "benign_server": "servers/benign/server.py",
+  "poisoned_server": "servers/poisoned/server.py",
+  "models": [
+    "claude-opus-4-8",
+    "gpt-5.5",
+    "gpt-5.4-nano",
+    "deepseek-v4-flash"
+  ],
+  "class_tasks": {
+    "tool_description": ["tasks/calc_add.json", "tasks/notes_pipeline.json"],
+    "schema_field": ["tasks/calc_add.json", "tasks/notes_pipeline.json"],
+    "rug_pull": ["tasks/notes_pipeline.json"],
+    "cross_server": ["tasks/account_review.json"]
+  },
+  "seeds": [41, 42, 43, 44, 45, 46, 47, 48, 49, 50],
+  "temperature": 1.0,
+  "max_concurrency": 4
+}
