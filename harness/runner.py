@@ -510,7 +510,11 @@ def run_trial(
     return summary, trace_path
 
 
-def main() -> None:
+def build_arg_parser() -> argparse.ArgumentParser:
+    """CLI for a single trial. Defense selection goes through the same named arms
+    as the sweep (`--defense-arm`); `--defense` stays as the v1 alias."""
+    from harness import arms  # lazy: keeps harness.runner importable without defense/
+
     parser = argparse.ArgumentParser(description="MCP-Poison-Bench runner.")
     parser.add_argument("--server", required=True, action="append", type=Path,
                         help="server path; repeat for multiple servers")
@@ -521,9 +525,48 @@ def main() -> None:
     parser.add_argument("--poison-class", default=None,
                         help="sets POISON_CLASS for poisoned servers")
     parser.add_argument("--poison-payload-id", default=None)
-    parser.add_argument("--defense", action="store_true",
-                        help="flip the client-side provenance/validation defense ON")
-    args = parser.parse_args()
+    parser.add_argument("--poison-objective", default=None,
+                        help="sets POISON_OBJECTIVE for poisoned servers")
+    parser.set_defaults(defense_arm="none")
+    parser.add_argument("--defense-arm", choices=arms.ARM_NAMES, metavar="NAME",
+                        dest="defense_arm",
+                        help=f"named defense arm ({', '.join(arms.ARM_NAMES)}); "
+                             "policy/confirm arms need a tasks/v2 task")
+    parser.add_argument("--defense", action="store_const", const="meta_filter",
+                        dest="defense_arm",
+                        help="backward-compatible alias for --defense-arm meta_filter")
+    parser.add_argument("--relist-each-step", action="store_true",
+                        help="re-list tools before every model turn (metadata_drift "
+                             "baselines; the pinning arm sets this itself)")
+    return parser
+
+
+def trial_kwargs_from_arm(arm: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
+    """Translate a `harness.arms.build_arm` result into `run_trial` keyword args.
+
+    Single source of truth shared by the sweep and the CLI so an arm option added
+    in one place (a findings collector, a context rewrite, a runner flag) cannot be
+    silently dropped by the other.
+    """
+    run_task = task
+    context_transform = arm.get("context_transform")
+    if context_transform is not None:
+        run_task = dict(task)
+        run_task["context"] = context_transform(task.get("context"))
+    return {
+        "task": run_task,
+        "tool_transform": arm["tool_transform"],
+        "result_transform": arm["result_transform"],
+        "result_findings": arm.get("result_findings"),
+        "call_policy": arm["call_policy"],
+        "pinning_findings": arm.get("pinning_findings"),
+        "confirm_prompts": arm.get("confirm_prompts"),
+        "relist_each_step": bool(arm.get("relist_each_step", False)),
+    }
+
+
+def main() -> None:
+    args = build_arg_parser().parse_args()
 
     task = json.loads(args.task.read_text(encoding="utf-8"))
     server_env: dict[str, str] = {}
@@ -531,17 +574,32 @@ def main() -> None:
         server_env["POISON_CLASS"] = args.poison_class
     if args.poison_payload_id:
         server_env["POISON_PAYLOAD_ID"] = args.poison_payload_id
+    if args.poison_objective:
+        server_env["POISON_OBJECTIVE"] = args.poison_objective
 
-    tool_transform = None
-    if args.defense:
-        from defense import provenance
-        tool_transform = provenance.build_tool_transform()
+    # Arms are composed in harness.arms (which imports defense.*); import lazily so
+    # `harness.runner` stays importable as a standalone library without defense/.
+    from harness import arms
+    arm = arms.build_arm(args.defense_arm, task)
+    kwargs = trial_kwargs_from_arm(arm, task)
+    kwargs["relist_each_step"] = kwargs["relist_each_step"] or args.relist_each_step
+
+    extra_config: dict[str, Any] = {
+        "defended": args.defense_arm != "none",
+        "defense_arm": args.defense_arm,
+    }
+    if args.poison_class:
+        extra_config["attack_class"] = args.poison_class
+    if args.poison_objective:
+        extra_config["objective"] = args.poison_objective
+    if arm.get("hardening_version") is not None:
+        extra_config["hardening_version"] = arm["hardening_version"]
 
     summary, trace_path = run_trial(
-        server_paths=args.server, task=task, model=args.model, seed=args.seed,
+        server_paths=args.server, model=args.model, seed=args.seed,
         server_env=server_env or None, temperature=args.temperature,
-        tool_transform=tool_transform,
-        extra_config={"attack_class": args.poison_class} if args.poison_class else None,
+        extra_config=extra_config,
+        **kwargs,
     )
 
     print("\n=== summary ===")

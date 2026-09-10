@@ -32,7 +32,7 @@ from typing import Any
 
 from fixtures.payloads import iter_payloads
 from harness import arms, clients, pricing
-from harness.runner import RESULTS_DIR, run_trial
+from harness.runner import RESULTS_DIR, run_trial, trial_kwargs_from_arm
 from scorer.asr import score_asr
 from scorer.asr_v2 import confirm_prompts as count_confirm_prompts
 from scorer.asr_v2 import score_asr_v2
@@ -177,14 +177,10 @@ def _run_one(
     arm = arms.build_arm(arm_name, task)
     defended = arm_name != "none"
     objective = spec.get("objective", "exfil_sink")
-    run_task = task
-    context_transform = arm.get("context_transform")
-    if context_transform is not None:
-        run_task = dict(task)
-        run_task["context"] = context_transform(task.get("context"))
-    relist_each_step = bool(
-        spec.get("relist_each_step", False)
-        or arm.get("relist_each_step", False)
+    # One translation from arm -> run_trial kwargs, shared with the runner CLI.
+    trial_kwargs = trial_kwargs_from_arm(arm, task)
+    trial_kwargs["relist_each_step"] = bool(
+        spec.get("relist_each_step", False) or trial_kwargs["relist_each_step"]
     )
     extra_config = {
         "attack_class": spec["attack_class"],
@@ -199,20 +195,13 @@ def _run_one(
         extra_config["hardening_version"] = arm["hardening_version"]
     _summary, trace_path = run_trial(
         server_paths=spec["servers"],
-        task=run_task,
         model=spec["model"],
         seed=spec["seed"],
         server_env=spec["server_env"],
         temperature=temperature,
         results_dir=trace_dir,
-        tool_transform=arm["tool_transform"],
-        result_transform=arm["result_transform"],
-        result_findings=arm.get("result_findings"),
-        call_policy=arm["call_policy"],
-        pinning_findings=arm.get("pinning_findings"),
-        confirm_prompts=arm.get("confirm_prompts"),
-        relist_each_step=relist_each_step,
         extra_config=extra_config,
+        **trial_kwargs,
     )
     # Scorers read the written trace (scorer reads traces, not live runs).
     from scorer.asr import load_trace
