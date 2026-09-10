@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -90,6 +91,67 @@ def test_build_trial_specs_threads_explicit_objective(tmp_path, monkeypatch):
         "POISON_PAYLOAD_ID": "tamper-payload",
         "POISON_OBJECTIVE": "arg_tamper",
     }
+
+
+def test_limit_per_class_touches_every_model_class():
+    specs = [
+        {"model": model, "attack_class": attack_class, "index": index}
+        for model in ("model-a", "model-b")
+        for attack_class in (
+            "tool_description",
+            "schema_field",
+            "rug_pull",
+            "cross_server",
+            "metadata_drift",
+        )
+        for index in range(5)
+    ]
+
+    limited = sweep._limit_specs_per_class(specs, 3)
+
+    assert len(limited) == 2 * 5 * 3
+    assert {
+        (spec["model"], spec["attack_class"])
+        for spec in limited
+    } == {
+        (model, attack_class)
+        for model in ("model-a", "model-b")
+        for attack_class in (
+            "tool_description",
+            "schema_field",
+            "rug_pull",
+            "cross_server",
+            "metadata_drift",
+        )
+    }
+
+
+def test_cli_threads_per_class_limit_and_report_suppression(monkeypatch):
+    seen: dict[str, object] = {}
+
+    def fake_run_sweep(config, **kwargs):
+        seen["config"] = config
+        seen.update(kwargs)
+
+    monkeypatch.setattr(sweep, "run_sweep", fake_run_sweep)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "harness.sweep",
+            "--config", "config/v2/heldout_exfil.json",
+            "--dry-run",
+            "--limit", "3",
+            "--limit-per-class",
+            "--no-dry-run-report",
+        ],
+    )
+
+    sweep.main()
+
+    assert seen["limit"] == 3
+    assert seen["limit_per_class"] is True
+    assert seen["report_dry_run"] is False
 
 
 def test_run_one_uses_trace_config_for_git_sha_and_records_v2_utility(

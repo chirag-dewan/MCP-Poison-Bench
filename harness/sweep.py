@@ -57,8 +57,22 @@ def _resolve_class_tasks(cfg: dict[str, Any]) -> dict[str, list[str]]:
     return {ac: [cfg["task"]] for ac in cfg["attack_classes"]}
 
 
+def _resolve_models(value: Any) -> list[str]:
+    """Resolve a model list, including the v2 ``@path/to/roster.json`` form."""
+    if isinstance(value, str) and value.startswith("@"):
+        roster_path = Path(value[1:])
+        if not roster_path.is_absolute():
+            roster_path = REPO_ROOT / roster_path
+        value = json.loads(roster_path.read_text(encoding="utf-8"))
+    if not isinstance(value, list) or not all(
+        isinstance(model, str) and model for model in value
+    ):
+        raise ValueError("models must be a list of model ids or @path/to/roster.json")
+    return value
+
+
 def _build_trial_specs(
-    cfg: dict[str, Any], task_dir: str | Path = "tasks",
+    cfg: dict[str, Any], task_dir: str | Path | None = None,
 ) -> list[dict[str, Any]]:
     """Expand the config into one spec per (model, class, task, payload, seed) trial.
 
@@ -73,7 +87,9 @@ def _build_trial_specs(
     objective = cfg.get("objective", "exfil_sink")
     class_tasks = _resolve_class_tasks(cfg)
     task_cache: dict[str, dict[str, Any]] = {}
-    task_root = Path(task_dir)
+    task_root = Path(
+        task_dir if task_dir is not None else cfg.get("task_dir", "tasks")
+    )
     if not task_root.is_absolute():
         task_root = REPO_ROOT / task_root
 
@@ -90,7 +106,7 @@ def _build_trial_specs(
         return task_cache[cache_key]
 
     specs: list[dict[str, Any]] = []
-    for model in cfg["models"]:
+    for model in _resolve_models(cfg["models"]):
         if not clients.has_api_key(model):
             print(f"  skip {model}: {clients.key_env_for(model)} not set")
             continue
@@ -287,6 +303,21 @@ def _limit_specs(specs: list[dict[str, Any]], per_model: int) -> list[dict[str, 
     return limited
 
 
+def _limit_specs_per_class(
+    specs: list[dict[str, Any]], per_model_class: int,
+) -> list[dict[str, Any]]:
+    """Cap each model/attack-class pair without changing legacy limit semantics."""
+    counts: defaultdict[tuple[str, str], int] = defaultdict(int)
+    limited: list[dict[str, Any]] = []
+    for spec in specs:
+        key = spec["model"], spec["attack_class"]
+        if counts[key] >= per_model_class:
+            continue
+        counts[key] += 1
+        limited.append(spec)
+    return limited
+
+
 def _preflight_arm(arm_name: str, specs: list[dict[str, Any]]) -> None:
     """Build the defense arm once per distinct task before any trial is submitted.
 
@@ -320,7 +351,9 @@ def run_sweep(
     dry_run: bool = False,
     project_trials_per_model: int = REFRESH_TRIALS_PER_MODEL,
     defense_arm: str | None = None,
-    task_dir: str | Path = "tasks",
+    task_dir: str | Path | None = None,
+    limit_per_class: bool = False,
+    report_dry_run: bool = True,
 ) -> Path:
     cfg = json.loads(Path(config_path).read_text(encoding="utf-8"))
     temperature = float(cfg.get("temperature", 1.0))
@@ -344,13 +377,22 @@ def run_sweep(
     out_path = Path(out_path).resolve()
     trace_dir = Path(trace_dir).resolve() if trace_dir is not None else RESULTS_DIR
 
-    specs = _build_trial_specs(cfg, task_dir=task_dir)
+    resolved_task_dir = task_dir if task_dir is not None else cfg.get(
+        "task_dir", "tasks"
+    )
+    specs = _build_trial_specs(cfg, task_dir=resolved_task_dir)
     _preflight_arm(arm_name, specs)
     # A dry run defaults to ten trials per model unless the caller gives a cap.
     if dry_run and limit is None:
         limit = 10
     if limit is not None:
-        specs = _limit_specs(specs, limit)
+        specs = (
+            _limit_specs_per_class(specs, limit)
+            if limit_per_class
+            else _limit_specs(specs, limit)
+        )
+    elif limit_per_class:
+        raise ValueError("limit_per_class requires a limit")
     set_name = cfg.get("payload_set", "seen")
     print(
         f"sweep [{'DEFENDED' if defended else 'baseline'}] set={set_name}"
@@ -412,7 +454,7 @@ def run_sweep(
         for r in records:
             fh.write(json.dumps(r, ensure_ascii=False) + "\n")
     print(f"\nwrote {len(records)} trial records to {out_path}")
-    if dry_run:
+    if dry_run and report_dry_run:
         _dry_run_report(records, project_trials_per_model)
     return out_path
 
@@ -427,7 +469,11 @@ def _dry_run_report(records: list[dict[str, Any]], project_trials_per_model: int
     print("DRY-RUN REPORT — parse validation + full-run cost projection")
     print("=" * 78)
     print(f"projecting each model's measured cost/trial x {project_trials_per_model} "
-          "trials/model (full refresh = held-out core 240 + ext 112 + seen 120)")
+          "trials/model for the requested full-run grid")
+    if not by_model:
+        print("\n  no runnable models; token-based dollar projection unavailable")
+        print("=" * 78)
+        return
 
     total_projected = 0.0
     any_unconfirmed = False
@@ -505,13 +551,19 @@ def main() -> None:
                              "baseline/defended filename; used for the held-out matrix)")
     parser.add_argument("--trace-dir", type=Path, default=None,
                         help="directory for per-trial JSONL traces (default: results/)")
-    parser.add_argument("--task-dir", type=Path, default=Path("tasks"),
-                        help="task root replacing the leading tasks/ config path")
+    parser.add_argument("--task-dir", type=Path, default=None,
+                        help="task root replacing the config task_dir (default: "
+                             "config value or tasks)")
     parser.add_argument("--limit", type=int, default=None,
                         help="cap trials per model, spread across attack classes")
+    parser.add_argument("--limit-per-class", action="store_true",
+                        help="interpret --limit as a cap per model and attack class")
     parser.add_argument("--dry-run", action="store_true",
                         help="cap to 10 trials/model by default and print validation + "
                              "cost projection")
+    parser.add_argument("--no-dry-run-report", action="store_false",
+                        dest="report_dry_run",
+                        help="suppress the per-sweep dry-run cost report")
     parser.add_argument("--project-trials-per-model", type=int,
                         default=REFRESH_TRIALS_PER_MODEL,
                         help="full-run trials/model used by the dry-run projection")
@@ -526,6 +578,8 @@ def main() -> None:
         project_trials_per_model=args.project_trials_per_model,
         defense_arm=args.defense_arm,
         task_dir=args.task_dir,
+        limit_per_class=args.limit_per_class,
+        report_dry_run=args.report_dry_run,
     )
 
 
