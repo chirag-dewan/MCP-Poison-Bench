@@ -3,10 +3,12 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .env
-CLAUDE.md
-results/*.jsonl
-results/*.csv
-results/*.log
-results/*.md
+results/**/*.jsonl
+results/**/*.csv
+results/**/*.log
+results/**/*.md
 results/spotcheck/
 !results/.gitkeep
+!results/*/matrix_*.csv
+!results/*/delta_*.md
+!results/*/RUN.md
