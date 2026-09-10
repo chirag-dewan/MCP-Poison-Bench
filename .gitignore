@@ -2,6 +2,11 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
 .env
 results/**/*.jsonl
 results/**/*.csv

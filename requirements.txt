@@ -1,7 +1,6 @@
-# MCP-Poison-Bench — direct dependencies, pinned for reproducibility.
-# Python 3.14.3 (see .python-version). Full transitive lock: requirements.lock.txt.
-# Reproduce the published run on this exact set; `pip install -r requirements.txt`.
-mcp==1.27.2
+# MCP-Poison-Bench — current direct dependencies, pinned for repeatable installs.
+# Python 3.14.3 (see .python-version). Full transitive snapshot: requirements.lock.txt.
+mcp==1.28.1
 anthropic==0.105.2
 openai==2.38.0
 pydantic==2.13.4
