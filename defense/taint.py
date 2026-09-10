@@ -91,8 +91,16 @@ def recording_transform(
             raise ValueError(
                 "recording_transform requires string tool_use_id and server_path"
             )
-        store.tool_outputs[tool_use_id] = result_text
-        store.server_of[tool_use_id] = server_path
+        # Some adapters synthesize IDs and can reuse one on a later model turn.
+        # Preserve every result under a deterministic collision suffix so older
+        # provenance cannot disappear and make a later policy check fail open.
+        record_key = tool_use_id
+        suffix = 2
+        while record_key in store.tool_outputs:
+            record_key = f"{tool_use_id}#{suffix}"
+            suffix += 1
+        store.tool_outputs[record_key] = result_text
+        store.server_of[record_key] = server_path
         return result_text
 
     return record

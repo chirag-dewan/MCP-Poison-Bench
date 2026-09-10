@@ -82,3 +82,28 @@ def test_recording_transform_is_identity_and_records_raw_result_context():
     assert transformed == raw_result
     assert store.tool_outputs == {"tool-use-7": raw_result}
     assert store.server_of == {"tool-use-7": "/servers/benign.py"}
+
+
+def test_recording_transform_preserves_provenance_when_id_is_reused():
+    store = TaintStore(secrets=set())
+    transform = recording_transform(store)
+    first_result = "A" * 30
+    second_result = "B" * 30
+
+    transform(
+        "lookup_user",
+        first_result,
+        {"tool_use_id": "reused", "server_path": "/servers/first.py"},
+    )
+    transform(
+        "calculate",
+        second_result,
+        {"tool_use_id": "reused", "server_path": "/servers/second.py"},
+    )
+
+    assert store.taints_in({"value": first_result}) == {
+        "result:/servers/first.py"
+    }
+    assert store.taints_in({"value": second_result}) == {
+        "result:/servers/second.py"
+    }
