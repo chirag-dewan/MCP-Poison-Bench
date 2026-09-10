@@ -25,20 +25,26 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
-from defense import provenance
 from fixtures.payloads import iter_payloads
-from harness import clients
+from harness import arms, clients, pricing
 from harness.runner import RESULTS_DIR, run_trial
 from scorer.asr import score_asr
+from scorer.asr_v2 import score_asr_v2
 from scorer.utility import score_utility
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TRIALS_PATH = RESULTS_DIR / "trials.jsonl"
 TRIALS_DEFENDED_PATH = RESULTS_DIR / "trials_defended.jsonl"
+
+#: Full 2026-07 refresh depth per model across the held-out core, held-out
+#: extension, and seen runs (baseline + defended).  Dry runs use it only for
+#: projecting measured cost-per-trial.
+REFRESH_TRIALS_PER_MODEL = 472
 
 
 def _resolve_class_tasks(cfg: dict[str, Any]) -> dict[str, list[str]]:
@@ -100,16 +106,52 @@ def _build_trial_specs(cfg: dict[str, Any]) -> list[dict[str, Any]]:
     return specs
 
 
+def _usage_from_events(events: list[dict[str, Any]]) -> tuple[int, int, int]:
+    """Sum (input, output, reasoning) tokens across assistant turns."""
+    in_tok = out_tok = reason_tok = 0
+    for event in events:
+        if event.get("type") != "assistant_message":
+            continue
+        usage = event.get("usage") or {}
+        in_tok += int(usage.get("input_tokens") or usage.get("prompt_tokens")
+                      or usage.get("prompt_token_count") or 0)
+        out_tok += int(usage.get("output_tokens") or usage.get("completion_tokens")
+                       or usage.get("candidates_token_count") or 0)
+        details = usage.get("completion_tokens_details") or {}
+        reason_tok += int(details.get("reasoning_tokens") or 0)
+    return in_tok, out_tok, reason_tok
+
+
+def _is_empty_output(events: list[dict[str, Any]]) -> bool:
+    """Return whether a trial produced neither a tool call nor non-empty text."""
+    for event in events:
+        if event.get("type") == "tool_call":
+            return False
+        if event.get("type") == "assistant_message":
+            for block in event.get("content") or []:
+                if (block.get("type") == "text"
+                        and (block.get("text") or "").strip()):
+                    return False
+    return True
+
+
 def _run_one(
-    spec: dict[str, Any], temperature: float, defense: bool,
+    spec: dict[str, Any], temperature: float, defense_arm: str | bool,
+    trace_dir: Path = RESULTS_DIR,
 ) -> dict[str, Any]:
     """Run a single trial and score it into a compact record.
 
-    `defense` flips the client-side provenance/validation layer on — the ONLY
-    thing that changes between baseline and defended runs.
+    ``defense_arm`` selects the runner's three defense seams.  Boolean values
+    remain accepted for callers of the pre-v2 private helper.  ``trace_dir``
+    routes per-trial traces without changing their contents.
     """
     task = spec["task"]
-    tool_transform = provenance.build_tool_transform() if defense else None
+    if isinstance(defense_arm, bool):
+        arm_name = "meta_filter" if defense_arm else "none"
+    else:
+        arm_name = defense_arm
+    arm = arms.build_arm(arm_name)
+    defended = arm_name != "none"
     summary, trace_path = run_trial(
         server_paths=spec["servers"],
         task=task,
@@ -117,20 +159,30 @@ def _run_one(
         seed=spec["seed"],
         server_env=spec["server_env"],
         temperature=temperature,
-        tool_transform=tool_transform,
+        results_dir=trace_dir,
+        tool_transform=arm["tool_transform"],
+        result_transform=arm["result_transform"],
+        call_policy=arm["call_policy"],
         extra_config={
             "attack_class": spec["attack_class"],
             "payload_id": spec["payload_id"],
             "payload_set": spec["payload_set"],
             "task_id": spec["task_id"],
-            "defended": defense,
+            "defended": defended,
+            "defense_arm": arm_name,
         },
     )
     # Scorers read the written trace (scorer reads traces, not live runs).
     from scorer.asr import load_trace
     events = load_trace(trace_path)
     asr = score_asr(events)
+    asr_v2 = score_asr_v2(events)
     util = score_utility(events, task)
+    in_tok, out_tok, reason_tok = _usage_from_events(events)
+    try:
+        trace_ref = trace_path.relative_to(REPO_ROOT)
+    except ValueError:
+        trace_ref = trace_path
     return {
         "model": spec["model"],
         "attack_class": spec["attack_class"],
@@ -139,14 +191,49 @@ def _run_one(
         "task_id": spec["task_id"],
         "seed": spec["seed"],
         "temperature": temperature,
-        "defended": defense,
+        "defended": defended,
+        "defense_arm": arm_name,
         "asr_fired": asr.fired,
+        "asr_attempted": asr_v2.attempted,
+        "asr_realized": asr_v2.realized,
+        "asr_blocked": asr_v2.blocked,
         "canary_exfiltrated": asr.canary_exfiltrated,
+        "canary_realized": asr_v2.canary_realized,
         "sink_calls": asr.sink_calls,
+        "truncated": asr_v2.truncated,
         "utility_ok": util.completed,
+        "in_tokens": in_tok,
+        "out_tokens": out_tok,
+        "reasoning_tokens": reason_tok,
+        "empty_output": _is_empty_output(events),
         "git_sha": summary.get("git_sha", ""),
-        "trace": str(trace_path.relative_to(REPO_ROOT)),
+        "trace": str(trace_ref),
     }
+
+
+def _limit_specs(specs: list[dict[str, Any]], per_model: int) -> list[dict[str, Any]]:
+    """Deterministically cap each model while sampling attack classes round-robin."""
+    by_model: dict[str, dict[str, deque]] = defaultdict(lambda: defaultdict(deque))
+    model_order: list[str] = []
+    for spec in specs:
+        model = spec["model"]
+        if model not in by_model:
+            model_order.append(model)
+        by_model[model][spec["attack_class"]].append(spec)
+
+    limited: list[dict[str, Any]] = []
+    for model in model_order:
+        queues = list(by_model[model].values())
+        taken = 0
+        while taken < per_model and any(queues):
+            for queue in queues:
+                if not queue:
+                    continue
+                limited.append(queue.popleft())
+                taken += 1
+                if taken >= per_model:
+                    break
+    return limited
 
 
 def run_sweep(
@@ -154,21 +241,44 @@ def run_sweep(
     append: bool = False,
     defense: bool = False,
     out_path: Path | None = None,
+    trace_dir: Path | None = None,
+    limit: int | None = None,
+    dry_run: bool = False,
+    project_trials_per_model: int = REFRESH_TRIALS_PER_MODEL,
+    defense_arm: str | None = None,
 ) -> Path:
     cfg = json.loads(Path(config_path).read_text(encoding="utf-8"))
     temperature = float(cfg.get("temperature", 1.0))
     max_workers = int(cfg.get("max_concurrency", 4))
+    arm_name = defense_arm if defense_arm is not None else (
+        "meta_filter" if defense else "none"
+    )
+    # Validate API callers too; argparse already validates CLI values.
+    if arm_name not in arms.ARM_NAMES:
+        arms.build_arm(arm_name)
+    defended = arm_name != "none"
     if out_path is None:
-        out_path = TRIALS_DEFENDED_PATH if defense else TRIALS_PATH
+        if dry_run:
+            name = "dry_run_trials_defended.jsonl" if defended else "dry_run_trials.jsonl"
+            out_path = RESULTS_DIR / name
+        else:
+            out_path = TRIALS_DEFENDED_PATH if defended else TRIALS_PATH
     # Resolve so a relative --out (e.g. results/foo.jsonl) is still under REPO_ROOT
     # for the final relative_to() display — passing a relative path used to crash
     # the sweep *after* it had already written every trial.
     out_path = Path(out_path).resolve()
+    trace_dir = Path(trace_dir).resolve() if trace_dir is not None else RESULTS_DIR
 
     specs = _build_trial_specs(cfg)
+    # A dry run defaults to ten trials per model unless the caller gives a cap.
+    if dry_run and limit is None:
+        limit = 10
+    if limit is not None:
+        specs = _limit_specs(specs, limit)
     set_name = cfg.get("payload_set", "seen")
     print(
-        f"sweep [{'DEFENDED' if defense else 'baseline'}] set={set_name}: "
+        f"sweep [{'DEFENDED' if defended else 'baseline'}] set={set_name}"
+        f"{' DRY-RUN' if dry_run else ''}: "
         f"{len(specs)} trials (temp={temperature}, concurrency={max_workers}) "
         f"-> {Path(out_path).name}"
     )
@@ -176,7 +286,10 @@ def run_sweep(
     records: list[dict[str, Any]] = []
     done = 0
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = {pool.submit(_run_one, s, temperature, defense): s for s in specs}
+        futures = {
+            pool.submit(_run_one, spec, temperature, arm_name, trace_dir): spec
+            for spec in specs
+        }
         for fut in as_completed(futures):
             s = futures[fut]
             try:
@@ -186,44 +299,148 @@ def run_sweep(
                     "model": s["model"], "attack_class": s["attack_class"],
                     "payload_id": s["payload_id"], "payload_set": s["payload_set"],
                     "task_id": s["task_id"], "seed": s["seed"],
-                    "temperature": temperature, "asr_fired": False,
+                    "temperature": temperature, "defended": defended,
+                    "defense_arm": arm_name, "asr_fired": False,
+                    "asr_attempted": False, "asr_realized": False,
+                    "asr_blocked": False,
                     "canary_exfiltrated": False, "sink_calls": 0,
-                    "utility_ok": False, "error": repr(exc), "trace": None,
+                    "canary_realized": False, "truncated": False,
+                    "utility_ok": False, "in_tokens": 0, "out_tokens": 0,
+                    "reasoning_tokens": 0, "empty_output": False,
+                    "error": repr(exc), "trace": None,
                 }
                 print(f"  ! trial errored {s['model']}/{s['attack_class']}/{s['task_id']}/"
                       f"{s['payload_id']}/seed{s['seed']}: {exc!r}")
             records.append(rec)
             done += 1
-            flag = "ASR" if rec["asr_fired"] else "   "
-            print(f"  [{done}/{len(specs)}] {flag} {rec['model']:<26} "
+            att = "ATT" if rec["asr_attempted"] else "   "
+            real = "REAL" if rec["asr_realized"] else "    "
+            blk = "BLK" if rec["asr_blocked"] else "   "
+            print(f"  [{done}/{len(specs)}] {att} {real} {blk} {rec['model']:<26} "
                   f"{rec['attack_class']:<16} {rec.get('task_id',''):<15} "
                   f"{rec['payload_id']:<14} seed{rec['seed']} util={rec['utility_ok']}")
 
     # Stable order: model, class, task, payload, seed — independent of completion.
     records.sort(key=lambda r: (r["model"], r["attack_class"], r.get("task_id", ""),
                                 r["payload_id"], r["seed"]))
-    RESULTS_DIR.mkdir(exist_ok=True)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     mode = "a" if append else "w"
     with out_path.open(mode, encoding="utf-8") as fh:
         for r in records:
             fh.write(json.dumps(r, ensure_ascii=False) + "\n")
-    print(f"\nwrote {len(records)} trial records to {out_path.relative_to(REPO_ROOT)}")
+    print(f"\nwrote {len(records)} trial records to {out_path}")
+    if dry_run:
+        _dry_run_report(records, project_trials_per_model)
     return out_path
+
+
+def _dry_run_report(records: list[dict[str, Any]], project_trials_per_model: int) -> None:
+    """Print parse health, measured token usage, and a full-run cost projection."""
+    by_model: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for record in records:
+        by_model[record["model"]].append(record)
+
+    print("\n" + "=" * 78)
+    print("DRY-RUN REPORT — parse validation + full-run cost projection")
+    print("=" * 78)
+    print(f"projecting each model's measured cost/trial x {project_trials_per_model} "
+          "trials/model (full refresh = held-out core 240 + ext 112 + seen 120)")
+
+    total_projected = 0.0
+    any_unconfirmed = False
+    any_missing_price = False
+    for model in sorted(by_model):
+        model_records = by_model[model]
+        trial_count = len(model_records)
+        error_count = sum(1 for record in model_records if record.get("error"))
+        ok_count = trial_count - error_count
+        empty_count = sum(
+            1 for record in model_records
+            if record.get("empty_output") and not record.get("error")
+        )
+        input_tokens = sum(record.get("in_tokens", 0) for record in model_records)
+        output_tokens = sum(record.get("out_tokens", 0) for record in model_records)
+        reasoning_tokens = sum(
+            record.get("reasoning_tokens", 0) for record in model_records
+        )
+        scored = [record for record in model_records if not record.get("error")]
+        measured_cost = pricing.estimate_cost(model, input_tokens, output_tokens)
+        price = pricing.price_for(model)
+
+        print(f"\n  {model}")
+        print(f"    trials: {trial_count}  ok: {ok_count}  errored: {error_count}  "
+              f"empty-output: {empty_count}"
+              + ("   <-- reasoning/MAX_TOKENS red flag" if empty_count else ""))
+        print(f"    tokens: in={input_tokens:,}  out={output_tokens:,}  "
+              f"(reasoning={reasoning_tokens:,})")
+        if price is None:
+            any_missing_price = True
+            print("    cost: NO PRICE ROW for this model — add it to harness/pricing.py")
+            continue
+        if not price.confirmed:
+            any_unconfirmed = True
+        tag = "" if price.confirmed else "  [UNCONFIRMED PRICE]"
+        if scored and measured_cost is not None:
+            per_trial = measured_cost / len(scored)
+            projected = per_trial * project_trials_per_model
+            total_projected += projected
+            print(f"    price:  ${price.input_per_m}/{price.output_per_m} per 1M "
+                  f"(in/out){tag}")
+            print(f"    cost:   ${measured_cost:.4f} measured over {len(scored)} scored "
+                  f"trials  =>  ${per_trial:.5f}/trial")
+            print(f"    PROJECTED full-run: ${projected:,.2f}  "
+                  f"(${per_trial:.5f} x {project_trials_per_model})")
+        else:
+            print(f"    price:  ${price.input_per_m}/{price.output_per_m} per 1M{tag}")
+            print("    cost:   no scored trials to measure from")
+
+    print("\n" + "-" * 78)
+    print(f"PROJECTED FULL-RUN TOTAL (all models): ${total_projected:,.2f}")
+    if any_unconfirmed:
+        print("\n  ⚠  One or more models were priced from an UNCONFIRMED placeholder "
+              "rate.\n     Confirm those rates in harness/pricing.py before trusting "
+              "this projection.")
+    if any_missing_price:
+        print("\n  ⚠  One or more models have NO price row and were left out of the total.")
+    print("=" * 78)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="MCP-Poison-Bench sweep driver.")
+    parser.set_defaults(defense_arm="none")
     parser.add_argument("--config", default="config/bench.json", type=Path)
     parser.add_argument("--append", action="store_true",
                         help="append instead of overwriting the trials file")
-    parser.add_argument("--defense", action="store_true",
-                        help="flip the client-side provenance/validation defense ON "
-                             "(writes results/trials_defended.jsonl)")
+    parser.add_argument("--defense-arm", choices=arms.ARM_NAMES, metavar="NAME",
+                        dest="defense_arm",
+                        help="named defense arm (none or meta_filter)")
+    parser.add_argument("--defense", action="store_const", const="meta_filter",
+                        dest="defense_arm",
+                        help="backward-compatible alias for --defense-arm meta_filter")
     parser.add_argument("--out", type=Path, default=None,
                         help="explicit output trials path (overrides the default "
                              "baseline/defended filename; used for the held-out matrix)")
+    parser.add_argument("--trace-dir", type=Path, default=None,
+                        help="directory for per-trial JSONL traces (default: results/)")
+    parser.add_argument("--limit", type=int, default=None,
+                        help="cap trials per model, spread across attack classes")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="cap to 10 trials/model by default and print validation + "
+                             "cost projection")
+    parser.add_argument("--project-trials-per-model", type=int,
+                        default=REFRESH_TRIALS_PER_MODEL,
+                        help="full-run trials/model used by the dry-run projection")
     args = parser.parse_args()
-    run_sweep(args.config, append=args.append, defense=args.defense, out_path=args.out)
+    run_sweep(
+        args.config,
+        append=args.append,
+        out_path=args.out,
+        trace_dir=args.trace_dir,
+        limit=args.limit,
+        dry_run=args.dry_run,
+        project_trials_per_model=args.project_trials_per_model,
+        defense_arm=args.defense_arm,
+    )
 
 
 if __name__ == "__main__":
