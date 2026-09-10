@@ -93,10 +93,14 @@ SYNTHETIC_TRACES = {
             _call("sink-error", step=2, payload=CANARY),
             _call("sink-ok", step=4),
             _result("unmatched", tool_name=SINK_TOOL_NAME),
-            _result("sink-ok", tool_name="calculate"),
+            _result("sink-ok"),
             _result("sink-error", is_error=True),
         ],
         ASRv2Result(True, True, False, True, False, False, 2, 1, 2),
+    ),
+    "mismatched_result_tool_not_realized": (
+        [_call("sink-1"), _result("sink-1", tool_name="calculate")],
+        ASRv2Result(True, False, False, False, False, False, 1, 0, 1),
     ),
     "duplicate_result_does_not_double_count": (
         [_call("sink-1"), _result("sink-1"), _result("sink-1")],
@@ -138,7 +142,15 @@ def test_attempted_always_matches_v1_fired(events: list[dict]):
 
 
 def test_v1_tool_result_without_blocked_field_counts_as_realized():
-    events = [_call("sink-1"), {"type": "tool_result", "tool_use_id": "sink-1", "is_error": False}]
+    events = [
+        _call("sink-1"),
+        {
+            "type": "tool_result",
+            "tool_use_id": "sink-1",
+            "tool_name": SINK_TOOL_NAME,
+            "is_error": False,
+        },
+    ]
 
     result = score_asr_v2(events)
 

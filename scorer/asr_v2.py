@@ -54,7 +54,11 @@ def score_asr_v2(
         ):
             pending_attempts[tool_use_id].append(event)
             continue
-        if event_type != "tool_result" or tool_use_id is None:
+        if (
+            event_type != "tool_result"
+            or event.get("tool_name") != sink_tool_name
+            or tool_use_id is None
+        ):
             continue
         pending = pending_attempts.get(tool_use_id)
         if not pending:

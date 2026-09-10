@@ -246,3 +246,45 @@ def test_max_tokens_is_explicitly_traced(monkeypatch):
         "step": 0,
     }
     assert trace.events[-1]["truncated"] is True
+
+
+def test_run_trial_creates_nested_unique_trace_paths(monkeypatch, tmp_path):
+    async def fake_run(*_args, **_kwargs):
+        return {"type": "summary", "truncated": False}
+
+    monkeypatch.setattr(runner, "run", fake_run)
+    monkeypatch.setattr(runner, "_utc_stamp", lambda: "20260910T120000Z")
+    trace_dir = tmp_path / "nested" / "traces"
+    common = {
+        "server_paths": [SERVER_PATH],
+        "task": TASK,
+        "model": "claude-test",
+        "seed": 7,
+        "results_dir": trace_dir,
+    }
+
+    _, first = runner.run_trial(
+        **common,
+        extra_config={
+            "attack_class": "rug_pull",
+            "payload_set": "heldout",
+            "payload_id": "held-1",
+            "defense_arm": "policy",
+        },
+    )
+    _, second = runner.run_trial(
+        **common,
+        extra_config={
+            "attack_class": "rug_pull",
+            "payload_set": "heldout",
+            "payload_id": "held-2",
+            "defense_arm": "policy",
+        },
+    )
+
+    assert first.parent == trace_dir
+    assert first.exists()
+    assert second.exists()
+    assert first != second
+    assert "-held-1-policy-" in first.name
+    assert "-held-2-policy-" in second.name

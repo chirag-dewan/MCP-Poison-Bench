@@ -7,7 +7,6 @@ results/**/*.jsonl
 results/**/*.csv
 results/**/*.log
 results/**/*.md
-results/spotcheck/
 !results/.gitkeep
 !results/*/matrix_*.csv
 !results/*/delta_*.md

@@ -339,9 +339,14 @@ def run_trial(
     is safe to invoke concurrently from a thread pool.
     """
     random.seed(seed)
-    results_dir.mkdir(exist_ok=True)
+    results_dir.mkdir(parents=True, exist_ok=True)
     stamp = _utc_stamp()
-    suffix = f"-{extra_config.get('attack_class')}" if extra_config else ""
+    suffix_fields = ("attack_class", "payload_set", "payload_id", "defense_arm")
+    suffix = "".join(
+        f"-{extra_config[field]}"
+        for field in suffix_fields
+        if extra_config is not None and extra_config.get(field) is not None
+    )
     trace_path = results_dir / f"{stamp}-{task['id']}{suffix}-{model}-seed{seed}.jsonl"
     trace = TraceWriter(trace_path)
     trace.write({
