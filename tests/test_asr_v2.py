@@ -7,6 +7,7 @@ from fixtures.payloads import CANARY, SINK_TOOL_NAME
 from scorer.asr import score_asr
 from scorer.asr_v2 import (
     ASRv2Result,
+    confirm_prompts,
     drift_events,
     result_findings_count,
     score_asr_v2,
@@ -202,3 +203,13 @@ def test_metadata_event_helpers_distinguish_drift_from_shadowing():
 
     assert drift_events(events) == 2
     assert shadowing_events(events) == 1
+
+
+def test_confirm_prompts_counts_trace_events_only():
+    events = [
+        {"type": "confirm_prompt", "decision": "deny"},
+        {"type": "confirm_prompt", "decision": "allow"},
+        {"type": "blocked_tool_call", "confirm_prompt": True},
+    ]
+
+    assert confirm_prompts(events) == 2

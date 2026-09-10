@@ -22,6 +22,24 @@ _RESULT_PROV_CLOSE = "[end-untrusted-tool-result]"
 _RESULT_REDACTED_PLACEHOLDER = "[tool result removed by provenance filter]"
 
 
+def build_marker_only_transform() -> ResultTransform:
+    """Wrap model-facing results in provenance markers without filtering.
+
+    This transform has no content rules, so its de-circularization property is
+    trivial: every result is preserved verbatim between the marker lines.
+    """
+
+    def transform(
+        tool_name: str,
+        text: str,
+        ctx: dict[str, Any],
+    ) -> str:
+        del tool_name, ctx
+        return f"{_RESULT_PROV_OPEN}\n{text}\n{_RESULT_PROV_CLOSE}"
+
+    return transform
+
+
 def build_result_transform(
     *,
     tag_provenance: bool = True,

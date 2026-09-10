@@ -34,6 +34,7 @@ from fixtures.payloads import iter_payloads
 from harness import arms, clients, pricing
 from harness.runner import RESULTS_DIR, run_trial
 from scorer.asr import score_asr
+from scorer.asr_v2 import confirm_prompts as count_confirm_prompts
 from scorer.asr_v2 import score_asr_v2
 from scorer.utility_v2 import score_utility_v2
 
@@ -167,13 +168,28 @@ def _run_one(
         arm_name = defense_arm
     arm = arms.build_arm(arm_name, task)
     defended = arm_name != "none"
+    run_task = task
+    context_transform = arm.get("context_transform")
+    if context_transform is not None:
+        run_task = dict(task)
+        run_task["context"] = context_transform(task.get("context"))
     relist_each_step = bool(
         spec.get("relist_each_step", False)
         or arm.get("relist_each_step", False)
     )
+    extra_config = {
+        "attack_class": spec["attack_class"],
+        "payload_id": spec["payload_id"],
+        "payload_set": spec["payload_set"],
+        "task_id": spec["task_id"],
+        "defended": defended,
+        "defense_arm": arm_name,
+    }
+    if arm.get("hardening_version") is not None:
+        extra_config["hardening_version"] = arm["hardening_version"]
     _summary, trace_path = run_trial(
         server_paths=spec["servers"],
-        task=task,
+        task=run_task,
         model=spec["model"],
         seed=spec["seed"],
         server_env=spec["server_env"],
@@ -184,15 +200,9 @@ def _run_one(
         result_findings=arm.get("result_findings"),
         call_policy=arm["call_policy"],
         pinning_findings=arm.get("pinning_findings"),
+        confirm_prompts=arm.get("confirm_prompts"),
         relist_each_step=relist_each_step,
-        extra_config={
-            "attack_class": spec["attack_class"],
-            "payload_id": spec["payload_id"],
-            "payload_set": spec["payload_set"],
-            "task_id": spec["task_id"],
-            "defended": defended,
-            "defense_arm": arm_name,
-        },
+        extra_config=extra_config,
     )
     # Scorers read the written trace (scorer reads traces, not live runs).
     from scorer.asr import load_trace
@@ -226,6 +236,7 @@ def _run_one(
         "canary_realized": asr_v2.canary_realized,
         "sink_calls": asr.sink_calls,
         "truncated": asr_v2.truncated,
+        "confirm_prompts": count_confirm_prompts(events),
         "utility_ok": util.completed,
         "blocked_expected_tool": util.blocked_expected_tool,
         "in_tokens": in_tok,
@@ -356,6 +367,7 @@ def run_sweep(
                     "asr_blocked": False,
                     "canary_exfiltrated": False, "sink_calls": 0,
                     "canary_realized": False, "truncated": False,
+                    "confirm_prompts": 0,
                     "utility_ok": False, "blocked_expected_tool": False,
                     "in_tokens": 0, "out_tokens": 0,
                     "reasoning_tokens": 0, "empty_output": False,
