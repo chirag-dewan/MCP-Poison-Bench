@@ -374,7 +374,11 @@ def run_trial(
     return summary, trace_path
 
 
-def main() -> None:
+def build_arg_parser() -> argparse.ArgumentParser:
+    """CLI for a single trial. Defense selection goes through the same named arms
+    as the sweep (`--defense-arm`); `--defense` stays as the v1 alias."""
+    from harness import arms  # lazy: keeps runner importable without defense/
+
     parser = argparse.ArgumentParser(description="MCP-Poison-Bench runner.")
     parser.add_argument("--server", required=True, action="append", type=Path,
                         help="server path; repeat for multiple servers")
@@ -385,9 +389,19 @@ def main() -> None:
     parser.add_argument("--poison-class", default=None,
                         help="sets POISON_CLASS for poisoned servers")
     parser.add_argument("--poison-payload-id", default=None)
-    parser.add_argument("--defense", action="store_true",
-                        help="flip the client-side provenance/validation defense ON")
-    args = parser.parse_args()
+    parser.set_defaults(defense_arm="none")
+    parser.add_argument("--defense-arm", choices=arms.ARM_NAMES, metavar="NAME",
+                        dest="defense_arm",
+                        help=f"named defense arm ({', '.join(arms.ARM_NAMES)}); "
+                             "policy arms need a tasks/v2 task")
+    parser.add_argument("--defense", action="store_const", const="meta_filter",
+                        dest="defense_arm",
+                        help="backward-compatible alias for --defense-arm meta_filter")
+    return parser
+
+
+def main() -> None:
+    args = build_arg_parser().parse_args()
 
     task = json.loads(args.task.read_text(encoding="utf-8"))
     server_env: dict[str, str] = {}
@@ -396,16 +410,22 @@ def main() -> None:
     if args.poison_payload_id:
         server_env["POISON_PAYLOAD_ID"] = args.poison_payload_id
 
-    tool_transform = None
-    if args.defense:
-        from defense import provenance
-        tool_transform = provenance.build_tool_transform()
+    # Arms are composed in harness.arms (which imports defense.*); import lazily so
+    # `harness.runner` stays importable as a standalone library without defense/.
+    from harness import arms
+    arm = arms.build_arm(args.defense_arm, task)
+
+    extra_config: dict[str, Any] = {"defense_arm": args.defense_arm}
+    if args.poison_class:
+        extra_config["attack_class"] = args.poison_class
 
     summary, trace_path = run_trial(
         server_paths=args.server, task=task, model=args.model, seed=args.seed,
         server_env=server_env or None, temperature=args.temperature,
-        tool_transform=tool_transform,
-        extra_config={"attack_class": args.poison_class} if args.poison_class else None,
+        tool_transform=arm["tool_transform"],
+        result_transform=arm["result_transform"],
+        call_policy=arm["call_policy"],
+        extra_config=extra_config,
     )
 
     print("\n=== summary ===")
