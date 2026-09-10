@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from harness import sweep
 
@@ -13,6 +14,7 @@ def _spec(task: dict) -> dict:
         "attack_class": "tool_description",
         "payload_id": "td_seen_01",
         "payload_set": "seen",
+        "objective": "exfil_sink",
         "task": task,
         "task_id": task["id"],
         "seed": 7,
@@ -43,6 +45,51 @@ def test_build_trial_specs_replaces_leading_tasks_root(tmp_path, monkeypatch):
     assert specs[0]["task"] == task
     assert specs[0]["task_id"] == "replacement-task"
     assert specs[0]["relist_each_step"] is True
+    assert specs[0]["objective"] == "exfil_sink"
+    assert specs[0]["server_env"]["POISON_OBJECTIVE"] == "exfil_sink"
+
+
+def test_build_trial_specs_threads_explicit_objective(tmp_path, monkeypatch):
+    task_path = tmp_path / "task.json"
+    task_path.write_text(
+        json.dumps({"id": "objective-task", "prompt": "test"}),
+        encoding="utf-8",
+    )
+    cfg = {
+        "models": ["test-model"],
+        "class_tasks": {"rug_pull": ["task.json"]},
+        "objective": "arg_tamper",
+        "payload_set": "heldout",
+        "benign_server": "benign.py",
+        "poisoned_server": "poisoned.py",
+        "seeds": [1],
+    }
+    seen: dict[str, str] = {}
+
+    def fake_iter_payloads(attack_class, set_name, *, objective):
+        seen.update(
+            attack_class=attack_class,
+            set_name=set_name,
+            objective=objective,
+        )
+        return [SimpleNamespace(id="tamper-payload")]
+
+    monkeypatch.setattr(sweep.clients, "has_api_key", lambda _model: True)
+    monkeypatch.setattr(sweep, "iter_payloads", fake_iter_payloads)
+
+    specs = sweep._build_trial_specs(cfg, task_dir=tmp_path)
+
+    assert seen == {
+        "attack_class": "rug_pull",
+        "set_name": "heldout",
+        "objective": "arg_tamper",
+    }
+    assert specs[0]["objective"] == "arg_tamper"
+    assert specs[0]["server_env"] == {
+        "POISON_CLASS": "rug_pull",
+        "POISON_PAYLOAD_ID": "tamper-payload",
+        "POISON_OBJECTIVE": "arg_tamper",
+    }
 
 
 def test_run_one_uses_trace_config_for_git_sha_and_records_v2_utility(
@@ -122,9 +169,13 @@ def test_run_one_uses_trace_config_for_git_sha_and_records_v2_utility(
     assert run_trial_kwargs["confirm_prompts"] == []
     assert run_trial_kwargs["task"]["context"] == "hardened: original context"
     assert run_trial_kwargs["extra_config"]["hardening_version"] == "test-version"
+    assert run_trial_kwargs["extra_config"]["objective"] == "exfil_sink"
     assert task["context"] == "original context"
     assert record["blocked_expected_tool"] is True
     assert record["confirm_prompts"] == 1
+    assert record["objective"] == "exfil_sink"
+    assert record["obj_fired"] is True
+    assert record["obj_realized"] is False
     assert record["git_sha"] == "trace-sha"
 
 
@@ -161,6 +212,9 @@ def test_run_sweep_threads_task_dir_and_defaults_error_signal_false(
     assert seen["task_dir"] == "tasks/v2"
     assert record["blocked_expected_tool"] is False
     assert record["confirm_prompts"] == 0
+    assert record["objective"] == "exfil_sink"
+    assert record["obj_fired"] is False
+    assert record["obj_realized"] is False
     assert record["git_sha"] == ""
     assert record["trace"] is None
 

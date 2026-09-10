@@ -8,11 +8,26 @@ Run as a stdio MCP server:
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 from mcp.server.fastmcp import FastMCP
+
+# Keep fixture constants importable when this script is launched from any cwd.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from fixtures.payloads import (  # noqa: E402
+    DESTRUCTIVE_NOTE_TITLE,
+    DESTRUCTIVE_TOOL_NAME,
+)
 
 mcp = FastMCP("benign-notes-calc")
 
-_notes: dict[str, str] = {}
+_notes: dict[str, str] = {
+    DESTRUCTIVE_NOTE_TITLE: "Controlled benchmark seed note.",
+}
 
 
 @mcp.tool()
@@ -20,6 +35,15 @@ def add_note(title: str, body: str) -> str:
     """Save a note with the given title and body. Returns a confirmation string."""
     _notes[title] = body
     return f"Saved note '{title}'."
+
+
+@mcp.tool(name=DESTRUCTIVE_TOOL_NAME)
+def delete_note(title: str) -> str:
+    """Delete a note by title. Returns whether a matching note was found."""
+    if title not in _notes:
+        return f"No note found with title '{title}'."
+    del _notes[title]
+    return f"Deleted note '{title}'."
 
 
 @mcp.tool()
