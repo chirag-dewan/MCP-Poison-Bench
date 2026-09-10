@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from fixtures.payloads import CANARY, SINK_TOOL_NAME
+from fixtures.payloads import CANARY, SINK_TOOL_NAME, get_payload, iter_payloads
 from harness import clients, runner
 from harness.arms import build_arm
 from scorer.asr_v2 import score_asr_v2
@@ -103,10 +103,12 @@ def _drive_run(
     tool_name: str | list[str] = "calculate",
     responses: list[clients.ModelResponse] | None = None,
     result_transform=None,
+    result_findings=None,
     call_policy=None,
     task: dict[str, Any] = TASK,
+    result_text: str = "raw result",
 ) -> tuple[MemoryTrace, FakeSession, list[dict[str, Any]]]:
-    session = FakeSession(tool_name)
+    session = FakeSession(tool_name, result_text=result_text)
     trace = MemoryTrace()
     scripted = list(responses or [_tool_turn(tool_name), _end_turn()])
     completion_calls: list[dict[str, Any]] = []
@@ -130,6 +132,7 @@ def _drive_run(
         7,
         trace,
         result_transform=result_transform,
+        result_findings=result_findings,
         call_policy=call_policy,
     ))
     assert not scripted
@@ -164,6 +167,59 @@ def test_result_transform_receives_context_and_preserves_raw_trace(monkeypatch):
     assert event["result_transformed"] is True
     assert event["blocked"] is False
     assert completions[1]["messages"][-1]["content"][0]["content"] == "transformed result"
+
+
+@pytest.mark.parametrize(
+    ("payload", "survives", "has_findings"),
+    [
+        (get_payload("rug_pull"), False, True),
+        (iter_payloads("rug_pull", "heldout")[0], True, False),
+    ],
+    ids=lambda case: getattr(case, "id", str(case)),
+)
+def test_result_filter_seen_and_heldout_reach_model_as_expected(
+    monkeypatch, payload, survives, has_findings,
+):
+    raw = f"17.0 add 25.0 = 42.0{payload.injection}"
+    arm = build_arm("result_filter", TASK)
+
+    trace, _session, completions = _drive_run(
+        monkeypatch,
+        result_text=raw,
+        result_transform=arm["result_transform"],
+        result_findings=arm["result_findings"],
+    )
+
+    model_text = completions[1]["messages"][-1]["content"][0]["content"]
+    assert (payload.injection in model_text) is survives
+    assert "17.0 add 25.0 = 42.0" in model_text
+    assert "untrusted-tool-result" in model_text
+    result = next(event for event in trace.events if event["type"] == "tool_result")
+    assert result["content"] == [{"type": "text", "text": raw}]
+    assert bool(result["result_findings"]) is has_findings
+
+
+def test_result_findings_do_not_leak_to_an_untransformed_later_result(monkeypatch):
+    payload = get_payload("rug_pull")
+    arm = build_arm("result_filter", TASK)
+    responses = [
+        _tool_turn("calculate", tool_use_id="call-1"),
+        _tool_turn("missing_tool", tool_use_id="call-2"),
+        _end_turn(),
+    ]
+
+    trace, _session, _completions = _drive_run(
+        monkeypatch,
+        responses=responses,
+        result_text=payload.injection,
+        result_transform=arm["result_transform"],
+        result_findings=arm["result_findings"],
+    )
+
+    results = [event for event in trace.events if event["type"] == "tool_result"]
+    assert results[0]["result_findings"]
+    assert results[1]["tool_name"] == "missing_tool"
+    assert results[1]["result_findings"] == []
 
 
 def test_denied_call_is_traced_but_never_dispatched(monkeypatch):

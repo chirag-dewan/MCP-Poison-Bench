@@ -146,6 +146,7 @@ async def run(
     temperature: float = 1.0,
     tool_transform: ToolTransform | None = None,
     result_transform: ResultTransform | None = None,
+    result_findings: list[Any] | None = None,
     call_policy: CallPolicy | None = None,
 ) -> dict[str, Any]:
     """Run `task` against `model` with `server_paths` launched as MCP servers.
@@ -259,6 +260,8 @@ async def run(
                 session = tool_owner.get(name)
                 server_path = tool_server_path.get(name)
                 blocked = False
+                if result_findings is not None:
+                    result_findings.clear()
                 if call_policy is not None:
                     decision = call_policy(name, tool_input, {
                         "step": step,
@@ -307,13 +310,19 @@ async def run(
                         "is_error": is_error,
                     })
                     result_was_transformed = True
-                trace.write({
+                result_event = {
                     "type": "tool_result", "step": step, "tool_use_id": tuid,
                     "tool_name": name, "is_error": is_error, "content": raw,
                     "content_transformed": transformed_text,
                     "result_transformed": result_was_transformed,
                     "blocked": blocked,
-                })
+                }
+                if result_findings is not None:
+                    result_event["result_findings"] = [
+                        {"rule": finding.rule, "snippet": finding.snippet}
+                        for finding in result_findings
+                    ]
+                trace.write(result_event)
                 tool_results_payload.append({
                     "type": "tool_result", "tool_use_id": tuid,
                     "content": transformed_text, "is_error": is_error,
@@ -348,6 +357,7 @@ def run_trial(
     results_dir: Path = RESULTS_DIR,
     tool_transform: ToolTransform | None = None,
     result_transform: ResultTransform | None = None,
+    result_findings: list[Any] | None = None,
     call_policy: CallPolicy | None = None,
     on_event: EventHook | None = None,
 ) -> tuple[dict[str, Any], Path]:
@@ -387,6 +397,7 @@ def run_trial(
             server_env=server_env, temperature=temperature,
             tool_transform=tool_transform,
             result_transform=result_transform,
+            result_findings=result_findings,
             call_policy=call_policy,
         ))
     finally:

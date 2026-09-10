@@ -174,6 +174,7 @@ def _run_one(
         results_dir=trace_dir,
         tool_transform=arm["tool_transform"],
         result_transform=arm["result_transform"],
+        result_findings=arm.get("result_findings"),
         call_policy=arm["call_policy"],
         extra_config={
             "attack_class": spec["attack_class"],
