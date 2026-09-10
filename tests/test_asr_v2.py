@@ -5,7 +5,7 @@ import pytest
 
 from fixtures.payloads import CANARY, SINK_TOOL_NAME
 from scorer.asr import score_asr
-from scorer.asr_v2 import ASRv2Result, score_asr_v2
+from scorer.asr_v2 import ASRv2Result, result_findings_count, score_asr_v2
 
 
 def _call(
@@ -170,3 +170,17 @@ def test_custom_sink_and_canary_are_supported():
     assert result.realized is True
     assert result.canary_exfiltrated is True
     assert result.canary_realized is True
+
+
+def test_result_findings_count_sums_tool_result_findings_only():
+    events = [
+        {"type": "tool_result", "result_findings": [{"rule": "one"}]},
+        {
+            "type": "tool_result",
+            "result_findings": [{"rule": "two"}, {"rule": "three"}],
+        },
+        {"type": "tool_result"},
+        {"type": "assistant_message", "result_findings": [{"rule": "ignored"}]},
+    ]
+
+    assert result_findings_count(events) == 3

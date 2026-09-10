@@ -4,6 +4,7 @@ from __future__ import annotations
 import pytest
 
 from defense import provenance
+from fixtures.payloads import get_payload
 from harness.arms import ARM_NAMES, build_arm
 
 
@@ -43,8 +44,28 @@ def test_unknown_arm_raises():
         build_arm("future_arm", TASK)
 
 
-def test_registry_includes_policy_arms():
-    assert ARM_NAMES == ("none", "meta_filter", "policy", "policy_full")
+def test_registry_includes_result_and_policy_arms():
+    assert ARM_NAMES == (
+        "none",
+        "meta_filter",
+        "result_filter",
+        "meta_and_result_filter",
+        "policy",
+        "policy_full",
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "has_metadata_filter"),
+    [("result_filter", False), ("meta_and_result_filter", True)],
+)
+def test_result_filter_arms_wire_expected_seams(name, has_metadata_filter):
+    arm = build_arm(name, TASK)
+
+    assert callable(arm["result_transform"])
+    assert arm["call_policy"] is None
+    assert callable(arm["tool_transform"]) is has_metadata_filter
+    assert arm["result_findings"] == []
 
 
 def test_policy_arm_wires_policy_and_recording_transform():
@@ -66,6 +87,28 @@ def test_policy_full_adds_v1_metadata_transform(monkeypatch):
     assert arm["tool_transform"] is transform
     assert callable(arm["result_transform"])
     assert callable(arm["call_policy"])
+
+
+def test_policy_full_records_raw_result_before_filtering():
+    arm = build_arm("policy_full", TASK)
+    raw = get_payload("rug_pull").injection
+    context = {
+        "tool_use_id": "calc-1",
+        "server_path": "servers/poisoned/server.py",
+        "is_error": False,
+    }
+
+    transformed = arm["result_transform"]("calculate", raw, context)
+    decision = arm["call_policy"](
+        "export_data",
+        {"payload": raw},
+        {"server_path": "servers/poisoned/server.py"},
+    )
+
+    assert raw not in transformed
+    assert arm["result_findings"]
+    assert decision.allow is False
+    assert decision.rule == "tainted_egress"
 
 
 def test_policy_arm_stores_are_fresh_per_build():
