@@ -35,7 +35,7 @@ from harness import arms, clients, pricing
 from harness.runner import RESULTS_DIR, run_trial
 from scorer.asr import score_asr
 from scorer.asr_v2 import score_asr_v2
-from scorer.utility import score_utility
+from scorer.utility_v2 import score_utility_v2
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TRIALS_PATH = RESULTS_DIR / "trials.jsonl"
@@ -55,7 +55,9 @@ def _resolve_class_tasks(cfg: dict[str, Any]) -> dict[str, list[str]]:
     return {ac: [cfg["task"]] for ac in cfg["attack_classes"]}
 
 
-def _build_trial_specs(cfg: dict[str, Any]) -> list[dict[str, Any]]:
+def _build_trial_specs(
+    cfg: dict[str, Any], task_dir: str | Path = "tasks",
+) -> list[dict[str, Any]]:
     """Expand the config into one spec per (model, class, task, payload, seed) trial.
 
     The payload dimension comes from the selected `payload_set` ("seen" |
@@ -68,11 +70,21 @@ def _build_trial_specs(cfg: dict[str, Any]) -> list[dict[str, Any]]:
     set_name = cfg.get("payload_set", "seen")
     class_tasks = _resolve_class_tasks(cfg)
     task_cache: dict[str, dict[str, Any]] = {}
+    task_root = Path(task_dir)
+    if not task_root.is_absolute():
+        task_root = REPO_ROOT / task_root
 
     def _load_task(rel: str) -> dict[str, Any]:
-        if rel not in task_cache:
-            task_cache[rel] = json.loads((REPO_ROOT / rel).read_text(encoding="utf-8"))
-        return task_cache[rel]
+        rel_path = Path(rel)
+        try:
+            task_relative = rel_path.relative_to("tasks")
+        except ValueError:
+            task_relative = rel_path
+        task_path = task_root / task_relative
+        cache_key = str(task_path)
+        if cache_key not in task_cache:
+            task_cache[cache_key] = json.loads(task_path.read_text(encoding="utf-8"))
+        return task_cache[cache_key]
 
     specs: list[dict[str, Any]] = []
     for model in cfg["models"]:
@@ -150,7 +162,7 @@ def _run_one(
         arm_name = "meta_filter" if defense_arm else "none"
     else:
         arm_name = defense_arm
-    arm = arms.build_arm(arm_name)
+    arm = arms.build_arm(arm_name, task)
     defended = arm_name != "none"
     summary, trace_path = run_trial(
         server_paths=spec["servers"],
@@ -177,7 +189,7 @@ def _run_one(
     events = load_trace(trace_path)
     asr = score_asr(events)
     asr_v2 = score_asr_v2(events)
-    util = score_utility(events, task)
+    util = score_utility_v2(events, task)
     in_tok, out_tok, reason_tok = _usage_from_events(events)
     try:
         trace_ref = trace_path.relative_to(REPO_ROOT)
@@ -202,6 +214,7 @@ def _run_one(
         "sink_calls": asr.sink_calls,
         "truncated": asr_v2.truncated,
         "utility_ok": util.completed,
+        "blocked_expected_tool": util.blocked_expected_tool,
         "in_tokens": in_tok,
         "out_tokens": out_tok,
         "reasoning_tokens": reason_tok,
@@ -246,6 +259,7 @@ def run_sweep(
     dry_run: bool = False,
     project_trials_per_model: int = REFRESH_TRIALS_PER_MODEL,
     defense_arm: str | None = None,
+    task_dir: str | Path = "tasks",
 ) -> Path:
     cfg = json.loads(Path(config_path).read_text(encoding="utf-8"))
     temperature = float(cfg.get("temperature", 1.0))
@@ -255,7 +269,7 @@ def run_sweep(
     )
     # Validate API callers too; argparse already validates CLI values.
     if arm_name not in arms.ARM_NAMES:
-        arms.build_arm(arm_name)
+        raise ValueError(f"unknown defense arm: {arm_name!r}")
     defended = arm_name != "none"
     if out_path is None:
         if dry_run:
@@ -269,7 +283,7 @@ def run_sweep(
     out_path = Path(out_path).resolve()
     trace_dir = Path(trace_dir).resolve() if trace_dir is not None else RESULTS_DIR
 
-    specs = _build_trial_specs(cfg)
+    specs = _build_trial_specs(cfg, task_dir=task_dir)
     # A dry run defaults to ten trials per model unless the caller gives a cap.
     if dry_run and limit is None:
         limit = 10
@@ -305,7 +319,8 @@ def run_sweep(
                     "asr_blocked": False,
                     "canary_exfiltrated": False, "sink_calls": 0,
                     "canary_realized": False, "truncated": False,
-                    "utility_ok": False, "in_tokens": 0, "out_tokens": 0,
+                    "utility_ok": False, "blocked_expected_tool": False,
+                    "in_tokens": 0, "out_tokens": 0,
                     "reasoning_tokens": 0, "empty_output": False,
                     "error": repr(exc), "trace": None,
                 }
@@ -413,7 +428,7 @@ def main() -> None:
                         help="append instead of overwriting the trials file")
     parser.add_argument("--defense-arm", choices=arms.ARM_NAMES, metavar="NAME",
                         dest="defense_arm",
-                        help="named defense arm (none or meta_filter)")
+                        help="named defense arm")
     parser.add_argument("--defense", action="store_const", const="meta_filter",
                         dest="defense_arm",
                         help="backward-compatible alias for --defense-arm meta_filter")
@@ -422,6 +437,8 @@ def main() -> None:
                              "baseline/defended filename; used for the held-out matrix)")
     parser.add_argument("--trace-dir", type=Path, default=None,
                         help="directory for per-trial JSONL traces (default: results/)")
+    parser.add_argument("--task-dir", type=Path, default=Path("tasks"),
+                        help="task root replacing the leading tasks/ config path")
     parser.add_argument("--limit", type=int, default=None,
                         help="cap trials per model, spread across attack classes")
     parser.add_argument("--dry-run", action="store_true",
@@ -440,6 +457,7 @@ def main() -> None:
         dry_run=args.dry_run,
         project_trials_per_model=args.project_trials_per_model,
         defense_arm=args.defense_arm,
+        task_dir=args.task_dir,
     )
 
 
