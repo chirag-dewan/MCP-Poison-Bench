@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/chirag-dewan/MCP-Poison-Bench/actions/workflows/ci.yml/badge.svg)](https://github.com/chirag-dewan/MCP-Poison-Bench/actions/workflows/ci.yml)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-blue.svg)](.python-version)
-[![Tests](https://img.shields.io/badge/tests-124%20passing-success.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-214%20passing-success.svg)](tests/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 A reproducible benchmark for **MCP tool-poisoning** across four attack classes, six
@@ -89,7 +89,7 @@ and on held-out payloads has little to reduce because little fires.
 
 ## Install
 
-Requires **Python 3.14**.
+Requires **Python 3.11+** (CI pins 3.14 via `.python-version`; the published run used 3.14.3).
 
 ```bash
 git clone https://github.com/chirag-dewan/MCP-Poison-Bench && cd MCP-Poison-Bench
@@ -121,15 +121,29 @@ Models whose provider key is unset are skipped with a log — never mocked. The 
 .venv/bin/python aggregate_all.py   # merge into the labeled matrices above
 ```
 
-**Run a single trial** (defense on/off via one flag):
+**Run a single trial** (defense selected by arm; `--defense` is an alias for the v1
+metadata filter):
 
 ```bash
 python -m harness.runner \
   --server servers/poisoned/server.py --task tasks/notes_pipeline.json \
-  --model gpt-4o-mini --seed 42 --poison-class rug_pull [--defense]
+  --model gpt-4o-mini --seed 42 --poison-class rug_pull \
+  [--defense-arm none|meta_filter|policy|policy_full]
+# capability-policy arms need the v2 task variants (same tasks + a `policy` block):
+python -m harness.runner ... --task tasks/v2/notes_pipeline.json --defense-arm policy
 ```
 
-**Tests** (offline, no API key — 124 tests):
+**Sweep flags added in v2** (`python -m harness.sweep --help`):
+
+```
+--defense-arm NAME   named arm (default none); --defense == --defense-arm meta_filter
+--task-dir DIR       task root replacing the leading tasks/ in configs (tasks/v2 for policy arms)
+--dry-run            ~10 trials/model, then a parse-validation + cost-projection report
+--limit N            cap trials per model, round-robin across attack classes
+--trace-dir DIR      where per-trial JSONL traces go (default results/)
+```
+
+**Tests** (offline, no API key — 214 tests):
 
 ```bash
 pytest -q
@@ -175,6 +189,36 @@ with non-trigger verbs. A unit test asserts mechanically that every held-out pay
 **zero** defense rules (and that seen payloads still trip them), so the separation cannot
 silently regress.
 
+## v2 (in progress) — content filters vs. capability controls
+
+v1's numbers above are frozen (tag `v1.0`; the files that produce them are listed as
+untouchable in [`CLAUDE.md`](CLAUDE.md) and diffed against in review). v2 keeps the
+methodology and asks a sharper question: **which controls are structural — phrasing-
+independent — and which are just better filters?** The plan is [`goals.md`](goals.md); the
+implementation is driven by the session prompts in [`prompts/`](prompts/).
+
+What has landed so far:
+
+- **Three runner seams**, all pure callables toggled exactly like the v1 defense:
+  `tool_transform` (tool list, v1), `result_transform` (tool *results* — the channel v1
+  could not see), and `call_policy` (runs after the attempted call is traced, before
+  dispatch; a denial is recorded as `blocked_tool_call` and never reaches the server).
+- **Attempted vs. realized ASR** (`scorer/asr_v2.py`): the model *trying* to reach the
+  sink vs. the sink *receiving* the call. v1's `asr_fired` is preserved and equals
+  `attempted`. Blocked, errored, and truncated outcomes are kept distinct and never
+  scored as clean resistance.
+- **Defense arms** (`harness/arms.py`, `--defense-arm`): `none`, `meta_filter` (= v1),
+  `policy` (task allowlist + provenance taint tracking + cross-server flow rule), and
+  `policy_full` (policy + v1 filter). Arms declared in `goals.md` but not yet
+  implemented: `result_filter`, `pinning`, `confirm`, `model_hardening`, `judge`.
+- **Harness correctness**: length-truncated responses now surface as
+  `stop_reason == "max_tokens"` instead of looking like a clean non-fire; sampling
+  parameters are gated per model and what was sent is recorded in the trace.
+
+The 2026-07 **roster refresh** (`config/refresh/`, `run_refresh.sh`,
+`aggregate_refresh.py`) re-runs v1's exact protocol on a current frontier+budget lineup
+into `results/2026-07-refresh/`; its output will be reported in `RESULTS-REFRESH.md`.
+
 ## Project structure
 
 ```
@@ -183,18 +227,26 @@ servers/
   benign/server.py       # well-behaved control server (calculate, add_note, lookup_user)
   poisoned/server.py     # parametrized: renders any of the 4 classes by env var
 harness/
-  runner.py              # multi-server runner; defense plugs in via tool_transform
+  runner.py              # multi-server runner; 3 seams: tool_transform · result_transform · call_policy
   clients.py             # MCP→model wiring; routes Anthropic / OpenAI / DeepSeek / Gemini
-  sweep.py               # {model}×{class}×{task}×{payload}×{seed} driver (± --defense)
+  sweep.py               # {model}×{class}×{task}×{payload}×{seed} driver (--defense-arm, --dry-run)
+  arms.py                # named defense arms → the three seams
+  pricing.py             # $/1M table for the dry-run cost projection (never feeds scoring)
 scorer/
-  asr.py, utility.py     # pure trace scorers
-  aggregate.py           # Wilson-CI matrices + baseline-vs-defended delta
+  asr.py, utility.py     # v1 pure trace scorers (frozen)
+  asr_v2.py, utility_v2.py  # attempted/realized/blocked/truncated; policy-broke-task signal
+  aggregate.py           # Wilson-CI matrices + baseline-vs-defended delta (frozen)
 defense/
-  provenance.py          # the client-side defense (toggle)
-  adversarial_tests.py   # attacks the defense; documents bypasses
-tasks/                   # benign multi-step tasks
-config/                  # sweep configs (bench_heldout/seen/*_xvendor/*_gpt55/*_ext)
-run_*.sh, aggregate_all.py   # de-circularized run + merge
+  provenance.py          # the v1 client-side metadata filter (frozen rules)
+  taint.py, policy.py    # v2: provenance taint store + capability/egress call policy
+  adversarial_tests.py   # attacks the v1 defense; documents bypasses
+tasks/                   # benign multi-step tasks (v1, frozen)
+tasks/v2/                # same tasks + a `policy` block for the capability arms
+config/                  # v1 sweep configs (frozen); config/refresh/ = 2026-07 roster refresh
+run_*.sh, aggregate_all.py     # v1 de-circularized run + merge
+run_refresh.sh, aggregate_refresh.py   # roster refresh driver + merge
+goals.md, prompts/       # v2 plan and the per-session implementation prompts
+CLAUDE.md                # agent guide: ownership, untouchable v1 files, seam contracts
 docs/                    # project page + architecture diagrams
 spec.md                  # project spec (v0.2) and findings
 ```

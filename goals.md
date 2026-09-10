@@ -144,7 +144,10 @@ Hypotheses (state them; let the data answer):
 - v1 = `master` as of the v1 tag. Tag it (`v1.0`) before v2 work starts.
 - Each prompt runs on its own branch off `master`: `v2/01-seams`, `v2/02-policy`,
   … and lands by PR. Never stack unmerged branches unless a prompt says so.
-- The 2026-07 roster refresh stays on `claude/mcp-poison-bench-roster-refresh-*`
-  and writes to `results/2026-07-refresh/`. It must not absorb v2 changes.
+- The 2026-07 roster refresh runs from `master` (its tooling was merged after the
+  v2 seams landed) and writes to `results/2026-07-refresh/`. It uses the `none` /
+  `meta_filter` arms, which are snapshot-tested to produce v1's exact trace shape;
+  the only behavioral differences from the v1 harness are the per-model sampling
+  gate and `finish_reason` surfacing, both of which must be noted in its `RUN.md`.
 - Every run directory carries a `RUN.md` with: git SHA, roster, arms, seeds,
   payload registers, date, and any deviations.

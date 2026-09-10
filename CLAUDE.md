@@ -73,7 +73,8 @@ metadata filter.
 
 ## Engineering discipline
 
-- Python 3.11+, type hints, async-first I/O, official MCP SDK, and `pytest`.
+- Python 3.11+ (CI pins 3.14 via `.python-version`), type hints, async-first I/O,
+  official MCP SDK, and `pytest`.
 - Keep edits surgical and use conventional commits.
 - Before committing, run the relevant focused tests and then `pytest -q`.
 - Confirm generated descriptor fixtures are stable and review the protected-file
