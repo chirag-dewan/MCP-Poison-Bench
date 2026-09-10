@@ -2,13 +2,13 @@
 # Python 3.14.3 on macOS (darwin). Generated with `pip freeze`.
 # Reconstruct on a compatible platform with `pip install -r requirements.lock.txt`;
 # this file has no hashes and is not a cross-platform byte-for-byte guarantee.
-annotated-types==0.7.0
+annotated-types==0.8.0
 anthropic==0.105.2
 anyio==4.13.0
 attrs==26.1.0
-certifi==2026.5.20
+certifi==2026.7.22
 cffi==2.0.0
-click==8.4.1
+click==8.5.0
 cryptography==50.0.1
 distro==1.9.0
 docstring_parser==0.18.0
