@@ -62,6 +62,20 @@ def get_anthropic_client() -> Anthropic:
     return Anthropic(max_retries=8)
 
 
+_NO_SAMPLING_PARAM_PREFIXES = (
+    "claude-opus-4-7",
+    "claude-opus-4-8",
+    "claude-sonnet-5",
+    "claude-fable-5",
+    "claude-mythos-5",
+)
+
+
+def supports_sampling_params(model: str) -> bool:
+    """Whether ``model`` accepts Anthropic sampling parameters."""
+    return not model.startswith(_NO_SAMPLING_PARAM_PREFIXES)
+
+
 def provider_for(model: str) -> str:
     """Map a model id to its provider by prefix. Raises on unknown families.
 
@@ -109,7 +123,7 @@ class ModelResponse:
     {"type": "tool_use", "id": ..., "name": ..., "input": {...}}.
     """
 
-    stop_reason: str          # "tool_use" | "end_turn"
+    stop_reason: str          # "tool_use" | "end_turn" | "max_tokens"
     content: list[dict[str, Any]]
     usage: dict[str, Any]
 
@@ -155,17 +169,24 @@ def _complete_anthropic(
     kwargs: dict[str, Any] = {
         "model": model,
         "max_tokens": max_tokens,
-        "temperature": temperature,
         "tools": tools,
         "messages": messages,
     }
+    sampling_params_supported = supports_sampling_params(model)
+    if sampling_params_supported:
+        kwargs["temperature"] = temperature
     if system:
         kwargs["system"] = system
     resp = client.messages.create(**kwargs)
+    usage = resp.usage.model_dump() if hasattr(resp.usage, "model_dump") else {}
+    usage["sampling"] = {
+        "temperature": temperature if sampling_params_supported else None,
+        "sent": sampling_params_supported,
+    }
     return ModelResponse(
         stop_reason=resp.stop_reason,
         content=[b.model_dump() for b in resp.content],
-        usage=resp.usage.model_dump() if hasattr(resp.usage, "model_dump") else {},
+        usage=usage,
     )
 
 
@@ -219,8 +240,15 @@ def _complete_openai_compatible(
             "name": tc.function.name,
             "input": json.loads(tc.function.arguments or "{}"),
         })
-    stop = "tool_use" if (choice.message.tool_calls) else "end_turn"
+    finish_reason = choice.finish_reason
+    if finish_reason == "length":
+        stop = "max_tokens"
+    elif finish_reason == "tool_calls" or choice.message.tool_calls:
+        stop = "tool_use"
+    else:
+        stop = "end_turn"
     usage = resp.usage.model_dump() if resp.usage else {}
+    usage["finish_reason"] = finish_reason
     return ModelResponse(stop_reason=stop, content=blocks, usage=usage)
 
 
