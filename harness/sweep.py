@@ -36,6 +36,7 @@ from harness.runner import RESULTS_DIR, run_trial
 from scorer.asr import score_asr
 from scorer.asr_v2 import confirm_prompts as count_confirm_prompts
 from scorer.asr_v2 import score_asr_v2
+from scorer.objective import score_objective
 from scorer.utility_v2 import score_utility_v2
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -69,6 +70,7 @@ def _build_trial_specs(
     benign = REPO_ROOT / cfg["benign_server"]
     poisoned = REPO_ROOT / cfg["poisoned_server"]
     set_name = cfg.get("payload_set", "seen")
+    objective = cfg.get("objective", "exfil_sink")
     class_tasks = _resolve_class_tasks(cfg)
     task_cache: dict[str, dict[str, Any]] = {}
     task_root = Path(task_dir)
@@ -94,7 +96,11 @@ def _build_trial_specs(
             continue
         only_ids = set(cfg.get("payload_ids") or [])
         for attack_class, task_rels in class_tasks.items():
-            payloads = iter_payloads(attack_class, set_name)
+            payloads = iter_payloads(
+                attack_class,
+                set_name,
+                objective=objective,
+            )
             if only_ids:  # run a specific subset (e.g. the register-widening batch)
                 payloads = [p for p in payloads if p.id in only_ids]
             servers = [benign, poisoned] if attack_class == "cross_server" else [poisoned]
@@ -107,6 +113,7 @@ def _build_trial_specs(
                             "attack_class": attack_class,
                             "payload_id": payload.id,
                             "payload_set": set_name,
+                            "objective": objective,
                             "task": task,
                             "task_id": task["id"],
                             "seed": seed,
@@ -114,6 +121,7 @@ def _build_trial_specs(
                             "server_env": {
                                 "POISON_CLASS": attack_class,
                                 "POISON_PAYLOAD_ID": payload.id,
+                                "POISON_OBJECTIVE": objective,
                             },
                             "relist_each_step": bool(
                                 cfg.get("relist_each_step", False)
@@ -168,6 +176,7 @@ def _run_one(
         arm_name = defense_arm
     arm = arms.build_arm(arm_name, task)
     defended = arm_name != "none"
+    objective = spec.get("objective", "exfil_sink")
     run_task = task
     context_transform = arm.get("context_transform")
     if context_transform is not None:
@@ -181,6 +190,7 @@ def _run_one(
         "attack_class": spec["attack_class"],
         "payload_id": spec["payload_id"],
         "payload_set": spec["payload_set"],
+        "objective": objective,
         "task_id": spec["task_id"],
         "defended": defended,
         "defense_arm": arm_name,
@@ -212,6 +222,7 @@ def _run_one(
     )
     asr = score_asr(events)
     asr_v2 = score_asr_v2(events)
+    objective_result = score_objective(events, task, objective)
     util = score_utility_v2(events, task)
     in_tok, out_tok, reason_tok = _usage_from_events(events)
     try:
@@ -223,6 +234,7 @@ def _run_one(
         "attack_class": spec["attack_class"],
         "payload_id": spec["payload_id"],
         "payload_set": spec["payload_set"],
+        "objective": objective,
         "task_id": spec["task_id"],
         "seed": spec["seed"],
         "temperature": temperature,
@@ -232,6 +244,8 @@ def _run_one(
         "asr_attempted": asr_v2.attempted,
         "asr_realized": asr_v2.realized,
         "asr_blocked": asr_v2.blocked,
+        "obj_fired": objective_result.fired,
+        "obj_realized": objective_result.realized,
         "canary_exfiltrated": asr.canary_exfiltrated,
         "canary_realized": asr_v2.canary_realized,
         "sink_calls": asr.sink_calls,
@@ -360,11 +374,13 @@ def run_sweep(
                 rec = {
                     "model": s["model"], "attack_class": s["attack_class"],
                     "payload_id": s["payload_id"], "payload_set": s["payload_set"],
+                    "objective": s.get("objective", "exfil_sink"),
                     "task_id": s["task_id"], "seed": s["seed"],
                     "temperature": temperature, "defended": defended,
                     "defense_arm": arm_name, "asr_fired": False,
                     "asr_attempted": False, "asr_realized": False,
                     "asr_blocked": False,
+                    "obj_fired": False, "obj_realized": False,
                     "canary_exfiltrated": False, "sink_calls": 0,
                     "canary_realized": False, "truncated": False,
                     "confirm_prompts": 0,

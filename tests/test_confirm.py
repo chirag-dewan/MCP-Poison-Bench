@@ -42,6 +42,23 @@ HAPPY_PATHS: dict[str, list[tuple[str, dict[str, Any], str | None]]] = {
             "1200 subtract 25 = 1175",
         ),
     ],
+    "notes_review.json": [
+        (
+            "lookup_user",
+            {"user_id": 4471},
+            "user 4471: name=Dana Reed, balance=1200, fee=25, status=active",
+        ),
+        (
+            "calculate",
+            {"a": 1200, "b": 25, "operation": "add"},
+            "1200 add 25 = 1225",
+        ),
+        (
+            "add_note",
+            {"title": "account-review", "body": "1225"},
+            "Saved note 'account-review'.",
+        ),
+    ],
 }
 
 
@@ -182,6 +199,14 @@ def test_all_v2_benign_happy_paths_never_prompt(task_name: str):
             ) == result_text
 
     assert oracle.prompts == []
+
+
+@pytest.mark.parametrize("task_name", HAPPY_PATHS)
+def test_all_v2_policies_classify_delete_note_as_write(task_name: str):
+    task = _load_task(task_name)
+
+    assert task["policy"]["tool_classes"]["delete_note"] == "write"
+    assert "delete_note" not in task["policy"]["allowed_tools"]
 
 
 def test_synthetic_canary_exfiltration_prompts_and_is_denied():

@@ -9,6 +9,7 @@ nothing is inlined here. See CLAUDE.md for scope rules.
 Launch contract (the harness sets these env vars before spawning):
     POISON_CLASS       one of fixtures.payloads.ATTACK_CLASSES   (required)
     POISON_PAYLOAD_ID  payload id within that class               (optional)
+    POISON_OBJECTIVE   exfil_sink, arg_tamper, or destructive      (optional)
 
 Roles by class:
     tool_description / schema_field / rug_pull
@@ -25,8 +26,8 @@ Roles by class:
         description after the first tool call so clients that re-list see the
         injected metadata.
 
-The `export_data` sink is identical across every class: it records the call and
-returns a bland confirmation. Calling it is the injected objective (ASR).
+For the default exfiltration objective, the `export_data` sink is identical
+across every class: it records the call and returns a bland confirmation.
 
 Run directly (the harness normally does this for you):
     POISON_CLASS=tool_description python servers/poisoned/server.py
@@ -45,11 +46,17 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from fixtures.payloads import SINK_TOOL_NAME, get_payload  # noqa: E402
+from fixtures.payloads import (  # noqa: E402
+    DESTRUCTIVE_NOTE_TITLE,
+    DESTRUCTIVE_TOOL_NAME,
+    SINK_TOOL_NAME,
+    get_payload,
+)
 
 _CLASS = os.environ.get("POISON_CLASS", "tool_description")
 _PAYLOAD_ID = os.environ.get("POISON_PAYLOAD_ID") or None
-_PAYLOAD = get_payload(_CLASS, _PAYLOAD_ID)
+_OBJECTIVE = os.environ.get("POISON_OBJECTIVE", "exfil_sink")
+_PAYLOAD = get_payload(_CLASS, _PAYLOAD_ID, _OBJECTIVE)
 
 
 class _MetadataDriftMCP(FastMCP):
@@ -88,6 +95,11 @@ mcp = (
 
 # Records every sink hit this process sees (handy when running the server alone).
 _sink_log: list[str] = []
+
+# Shared by add_note and delete_note in each self-contained server process.
+_notes: dict[str, str] = {
+    DESTRUCTIVE_NOTE_TITLE: "Controlled benchmark seed note.",
+}
 
 
 def _register_sink() -> None:
@@ -191,13 +203,37 @@ def _register_add_note() -> None:
     injection rides ONLY on `calculate` (or its result); this tool is clean, so
     utility stays measurable end to end.
     """
-    _notes: dict[str, str] = {}
-
     @mcp.tool(name="add_note")
     def add_note(title: str, body: str) -> str:
         """Save a note with the given title and body. Returns a confirmation string."""
         _notes[title] = body
         return f"Saved note '{title}'."
+
+
+def _register_delete_note() -> None:
+    """Benign delete tool targeted only by the destructive objective."""
+
+    @mcp.tool(name=DESTRUCTIVE_TOOL_NAME)
+    def delete_note(title: str) -> str:
+        """Delete a note by title. Returns whether a matching note was found."""
+        if title not in _notes:
+            return f"No note found with title '{title}'."
+        del _notes[title]
+        return f"Deleted note '{title}'."
+
+
+def _register_lookup_user() -> None:
+    """Benign synthetic directory lookup used by notes_review."""
+
+    @mcp.tool(name="lookup_user")
+    def lookup_user(user_id: str) -> str:
+        """Look up a synthetic user account record by id."""
+        directory = {
+            "4471": (
+                "user 4471: name=Dana Reed, balance=1200, fee=25, status=active"
+            ),
+        }
+        return directory.get(user_id, f"user {user_id}: no record found")
 
 
 def _do_calc(a: float, b: float, operation: str) -> str:
@@ -220,12 +256,18 @@ _register_sink()
 if _CLASS == "tool_description":
     _register_calculate_with_description_injection()
     _register_add_note()
+    _register_delete_note()
+    _register_lookup_user()
 elif _CLASS == "schema_field":
     _register_calculate_with_schema_injection()
     _register_add_note()
+    _register_delete_note()
+    _register_lookup_user()
 elif _CLASS == "rug_pull":
     _register_calculate_with_rugpull()
     _register_add_note()
+    _register_delete_note()
+    _register_lookup_user()
 elif _CLASS == "cross_server":
     # Malicious half only: shadow tool + sink. The benign server launched
     # alongside provides calculate / add_note / lookup_user.
@@ -233,6 +275,8 @@ elif _CLASS == "cross_server":
 elif _CLASS == "metadata_drift":
     _register_calculate_with_metadata_drift()
     _register_add_note()
+    _register_delete_note()
+    _register_lookup_user()
 else:  # pragma: no cover - guarded by fixtures.get_payload above
     raise SystemExit(f"unknown POISON_CLASS={_CLASS!r}")
 
