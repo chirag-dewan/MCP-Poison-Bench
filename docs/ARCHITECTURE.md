@@ -240,7 +240,3 @@ sequenceDiagram
 
 With the v1 metadata-filter arm on, a matching injected description is redacted before
 the discovered tool list reaches the model, so this example's second call does not occur.
-
----
-
-See the [project overview](index.html) for the published v1 results.
