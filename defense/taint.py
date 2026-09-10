@@ -1,11 +1,21 @@
 """Lightweight provenance tracking for capability-policy decisions.
 
-The tracker deliberately uses literal substring matching rather than attempting
+The tracker deliberately uses literal string matching rather than attempting
 semantic data-flow analysis.  A string leaf is considered derived from a prior
-tool result when the two strings share at least 24 consecutive characters.  This
-catches copied or quoted result text while limiting collisions on short, common
-fragments, but it remains an approximation: paraphrases are not detected and
-unrelated long boilerplate can produce a false positive.
+tool result when either rule holds:
+
+1. **Exact match** — the leaf equals the whole result (whitespace-trimmed) and
+   the result is at least ``_MIN_EXACT_RESULT`` characters.  This is what
+   catches short structured outputs such as arithmetic results
+   (``"128 add 256 = 384"`` is 17 characters) being forwarded verbatim.
+2. **Long shared substring** — the two strings share at least
+   ``_MIN_RESULT_SUBSTRING`` consecutive characters.  This catches quoted or
+   embedded fragments of longer results while limiting collisions on short,
+   common tokens.
+
+Both rules are approximations and are documented as such: paraphrases are not
+detected, a value *extracted* from a result (the bare ``384``) is not tracked,
+and unrelated long boilerplate can produce a false positive.
 """
 from __future__ import annotations
 
@@ -14,6 +24,12 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 
+#: Minimum length of a whole tool result for an exact-match leaf to count as
+#: derived from it.  Below this, equality is too likely to be coincidental
+#: ("ok", "42", "done").
+_MIN_EXACT_RESULT = 8
+
+#: Minimum shared-substring length for the fragment rule.
 _MIN_RESULT_SUBSTRING = 24
 
 
@@ -39,6 +55,14 @@ def _shares_long_substring(left: str, right: str) -> bool:
         shorter[start:start + _MIN_RESULT_SUBSTRING] in longer
         for start in range(last_start + 1)
     )
+
+
+def _derived_from_result(leaf: str, result_text: str) -> bool:
+    """Apply both provenance rules: exact whole-result match, then long substring."""
+    trimmed_result = result_text.strip()
+    if len(trimmed_result) >= _MIN_EXACT_RESULT and leaf.strip() == trimmed_result:
+        return True
+    return _shares_long_substring(leaf, result_text)
 
 
 @dataclass
@@ -69,7 +93,7 @@ class TaintStore:
             server_path = self.server_of.get(tool_use_id)
             if server_path is None:
                 continue
-            if any(_shares_long_substring(leaf, result_text) for leaf in leaves):
+            if any(_derived_from_result(leaf, result_text) for leaf in leaves):
                 labels.add(f"result:{server_path}")
 
         return labels

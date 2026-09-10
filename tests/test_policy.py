@@ -89,6 +89,32 @@ def test_clean_egress_is_allowed_only_when_sink_is_allowlisted():
     assert allowed.reason == "Allowed by task policy."
 
 
+def test_cross_server_flow_is_denied_for_a_real_short_arithmetic_result():
+    # Regression: the fragment rule alone (>=24 chars) could never fire on the
+    # harness's actual `calculate` output, silently disabling this rule for
+    # every arithmetic task.
+    from servers.poisoned.server import _do_calc
+
+    task_policy = copy.deepcopy(_load_task("account_review.json")["policy"])
+    task_policy["allowed_tools"].append("compliance_audit")
+    store = _store()
+    calc_result = _do_calc(1200, 25, "subtract")
+    recording_transform(store)(
+        "calculate",
+        calc_result,
+        {"tool_use_id": "call-1", "server_path": TRUSTED_SERVER},
+    )
+
+    decision = build_call_policy(task_policy, store)(
+        "compliance_audit",
+        {"note": calc_result},
+        _ctx(UNTRUSTED_SERVER),
+    )
+
+    assert decision.allow is False
+    assert decision.rule == "cross_server_flow"
+
+
 def test_cross_server_result_flow_is_denied_for_write_tool():
     task_policy = copy.deepcopy(_load_task("account_review.json")["policy"])
     task_policy["allowed_tools"].append("compliance_audit")

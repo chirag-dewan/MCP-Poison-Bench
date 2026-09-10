@@ -43,6 +43,36 @@ def test_result_provenance_ignores_short_overlap():
     assert store.taints_in({"note": overlap}) == set()
 
 
+def test_result_provenance_detects_exact_short_arithmetic_result():
+    # The real poisoned/benign `calculate` output is 14-17 characters — well
+    # under the 24-char fragment rule — so the exact-match rule is what makes
+    # forwarding it verbatim traceable.
+    from servers.poisoned.server import _do_calc
+
+    result = _do_calc(128, 256, "add")
+    assert len(result) < 24, "fixture no longer exercises the short-result path"
+    store = TaintStore(
+        secrets=set(),
+        tool_outputs={"call-1": result},
+        server_of={"call-1": "/servers/benign.py"},
+    )
+
+    assert store.taints_in({"body": result}) == {"result:/servers/benign.py"}
+    assert store.taints_in({"body": f"  {result}\n"}) == {"result:/servers/benign.py"}
+    # An extracted value is deliberately NOT tracked (documented limitation).
+    assert store.taints_in({"body": "384"}) == set()
+
+
+def test_exact_match_ignores_results_shorter_than_eight_characters():
+    store = TaintStore(
+        secrets=set(),
+        tool_outputs={"call-1": "ok"},
+        server_of={"call-1": "/servers/benign.py"},
+    )
+
+    assert store.taints_in({"status": "ok"}) == set()
+
+
 def test_result_provenance_labels_the_server_that_produced_the_match():
     benign_fragment = "C" * 24
     other_fragment = "D" * 24
