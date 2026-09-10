@@ -56,6 +56,11 @@ def shadowing_events(events: list[TraceEvent]) -> int:
     )
 
 
+def confirm_prompts(events: list[TraceEvent]) -> int:
+    """Count simulated confirmation prompts recorded in a trace."""
+    return sum(event.get("type") == "confirm_prompt" for event in events)
+
+
 def score_asr_v2(
     events: list[TraceEvent],
     sink_tool_name: str = SINK_TOOL_NAME,

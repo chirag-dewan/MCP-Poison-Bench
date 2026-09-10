@@ -51,6 +51,7 @@ def test_run_one_uses_trace_config_for_git_sha_and_records_v2_utility(
     task = {
         "id": "expected-blocked",
         "prompt": "test",
+        "context": "original context",
         "expected_tool": "export_data",
     }
     trace_path = tmp_path / "trace.jsonl"
@@ -78,6 +79,7 @@ def test_run_one_uses_trace_config_for_git_sha_and_records_v2_utility(
             "is_error": True,
             "blocked": True,
         },
+        {"type": "confirm_prompt", "decision": "deny"},
         {"type": "summary", "final_text": "", "truncated": False},
     ]
     trace_path.write_text(
@@ -96,6 +98,9 @@ def test_run_one_uses_trace_config_for_git_sha_and_records_v2_utility(
             "call_policy": None,
             "pinning_findings": pinning_findings,
             "relist_each_step": True,
+            "confirm_prompts": [],
+            "context_transform": lambda context: f"hardened: {context}",
+            "hardening_version": "test-version",
         }
 
     def fake_run_trial(**kwargs):
@@ -114,7 +119,12 @@ def test_run_one_uses_trace_config_for_git_sha_and_records_v2_utility(
     run_trial_kwargs = seen["run_trial_kwargs"]
     assert run_trial_kwargs["pinning_findings"] is pinning_findings
     assert run_trial_kwargs["relist_each_step"] is True
+    assert run_trial_kwargs["confirm_prompts"] == []
+    assert run_trial_kwargs["task"]["context"] == "hardened: original context"
+    assert run_trial_kwargs["extra_config"]["hardening_version"] == "test-version"
+    assert task["context"] == "original context"
     assert record["blocked_expected_tool"] is True
+    assert record["confirm_prompts"] == 1
     assert record["git_sha"] == "trace-sha"
 
 
@@ -150,6 +160,7 @@ def test_run_sweep_threads_task_dir_and_defaults_error_signal_false(
     record = json.loads(out_path.read_text(encoding="utf-8"))
     assert seen["task_dir"] == "tasks/v2"
     assert record["blocked_expected_tool"] is False
+    assert record["confirm_prompts"] == 0
     assert record["git_sha"] == ""
     assert record["trace"] is None
 

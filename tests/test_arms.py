@@ -53,6 +53,9 @@ def test_registry_includes_result_and_policy_arms():
         "pinning",
         "policy",
         "policy_full",
+        "confirm",
+        "confirm_ux",
+        "model_hardening",
     )
 
 
@@ -148,6 +151,70 @@ def test_policy_full_records_raw_result_before_filtering():
     assert decision.rule == "tainted_egress"
 
 
+@pytest.mark.parametrize(
+    ("name", "expected_allow", "expected_mode"),
+    [
+        ("confirm", False, "deny_tainted_egress"),
+        ("confirm_ux", True, "allow_all"),
+    ],
+)
+def test_confirmation_arms_record_and_decide_tainted_egress(
+    name, expected_allow, expected_mode,
+):
+    arm = build_arm(name, TASK)
+
+    assert arm["tool_transform"] is None
+    assert arm["result_transform"](
+        "calculate",
+        "17 add 25 = 42",
+        {"tool_use_id": "calc-1", "server_path": "server.py"},
+    ) == "17 add 25 = 42"
+    decision = arm["call_policy"](
+        "export_data",
+        {"payload": "CANARY-TEST"},
+        {"step": 1, "server_path": "server.py"},
+    )
+
+    assert decision.allow is expected_allow
+    assert decision.rule == f"confirm:{expected_mode}"
+    assert arm["confirm_prompts"][0]["decision"] == (
+        "allow" if expected_allow else "deny"
+    )
+
+
+def test_confirmation_arm_oracles_are_fresh_per_build():
+    first = build_arm("confirm", TASK)
+    second = build_arm("confirm", TASK)
+
+    first["call_policy"](
+        "export_data",
+        {"payload": "CANARY-TEST"},
+        {"step": 0, "server_path": "server.py"},
+    )
+
+    assert len(first["confirm_prompts"]) == 1
+    assert second["confirm_prompts"] == []
+
+
+def test_model_hardening_arm_composes_prompt_and_marker_only_transforms():
+    arm = build_arm("model_hardening", TASK)
+    injected = get_payload("rug_pull").injection
+
+    context = arm["context_transform"]("original context")
+    tool = arm["tool_transform"]([{
+        "name": "calculate",
+        "description": injected,
+        "input_schema": {},
+    }])[0]
+    result = arm["result_transform"]("calculate", injected, {})
+
+    assert arm["hardening_version"] == "v2.0"
+    assert context.endswith("original context")
+    assert injected in tool["description"]
+    assert injected in result
+    assert arm["call_policy"] is None
+
+
 def test_policy_arm_stores_are_fresh_per_build():
     result = "account balance is 1200 and processing fee is 25"
     context = {
@@ -171,7 +238,9 @@ def test_policy_arm_stores_are_fresh_per_build():
     assert second_decision.allow is True
 
 
-@pytest.mark.parametrize("name", ["policy", "policy_full"])
+@pytest.mark.parametrize(
+    "name", ["policy", "policy_full", "confirm", "confirm_ux"],
+)
 def test_policy_arms_require_task_policy(name):
     with pytest.raises(ValueError, match="requires task.policy"):
         build_arm(name, {})

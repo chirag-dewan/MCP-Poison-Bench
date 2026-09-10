@@ -149,6 +149,7 @@ async def run(
     result_findings: list[Any] | None = None,
     call_policy: CallPolicy | None = None,
     pinning_findings: list[Any] | None = None,
+    confirm_prompts: list[dict[str, Any]] | None = None,
     relist_each_step: bool = False,
 ) -> dict[str, Any]:
     """Run `task` against `model` with `server_paths` launched as MCP servers.
@@ -352,6 +353,9 @@ async def run(
                 if result_findings is not None:
                     result_findings.clear()
                 if call_policy is not None:
+                    prior_confirm_prompts = (
+                        len(confirm_prompts) if confirm_prompts is not None else 0
+                    )
                     decision = call_policy(name, tool_input, {
                         "step": step,
                         "tool_use_id": tuid,
@@ -361,6 +365,12 @@ async def run(
                         # a policy accidentally mutates the read-only snapshot.
                         "history": copy.deepcopy(messages),
                     })
+                    if confirm_prompts is not None:
+                        for prompt in confirm_prompts[prior_confirm_prompts:]:
+                            trace.write({
+                                "type": "confirm_prompt",
+                                **copy.deepcopy(prompt),
+                            })
                     if not decision.allow:
                         blocked = True
                         trace.write({
@@ -449,6 +459,7 @@ def run_trial(
     result_findings: list[Any] | None = None,
     call_policy: CallPolicy | None = None,
     pinning_findings: list[Any] | None = None,
+    confirm_prompts: list[dict[str, Any]] | None = None,
     relist_each_step: bool = False,
     on_event: EventHook | None = None,
 ) -> tuple[dict[str, Any], Path]:
@@ -491,6 +502,7 @@ def run_trial(
             result_findings=result_findings,
             call_policy=call_policy,
             pinning_findings=pinning_findings,
+            confirm_prompts=confirm_prompts,
             relist_each_step=relist_each_step,
         ))
     finally:

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from defense import pinning, policy, provenance, result_filter, taint
+from defense import confirm, hardening, pinning, policy, provenance, result_filter, taint
 
 ARM_NAMES = (
     "none",
@@ -17,6 +17,9 @@ ARM_NAMES = (
     "pinning",
     "policy",
     "policy_full",
+    "confirm",
+    "confirm_ux",
+    "model_hardening",
 )
 
 
@@ -137,5 +140,34 @@ def build_arm(
                 if pinning_findings is not None
                 else {}
             ),
+        }
+    if name in {"confirm", "confirm_ux"}:
+        task_policy = task.get("policy")
+        if not isinstance(task_policy, dict):
+            raise ValueError(f"{name} arm requires task.policy")
+        secrets = task_policy.get("secrets", [])
+        if not isinstance(secrets, list) or not all(
+            isinstance(secret, str) for secret in secrets
+        ):
+            raise ValueError("task.policy.secrets must be a list of strings")
+        store = taint.TaintStore(secrets=set(secrets))
+        oracle = confirm.ConfirmOracle(
+            "deny_tainted_egress" if name == "confirm" else "allow_all"
+        )
+        return {
+            "tool_transform": None,
+            "result_transform": taint.recording_transform(store),
+            "call_policy": confirm.build_confirm_policy(
+                task_policy, store, oracle,
+            ),
+            "confirm_prompts": oracle.prompts,
+        }
+    if name == "model_hardening":
+        return {
+            "tool_transform": hardening.build_marker_only_tool_transform(),
+            "result_transform": result_filter.build_marker_only_transform(),
+            "call_policy": None,
+            "context_transform": hardening.build_context_transform(),
+            "hardening_version": hardening.HARDENING_VERSION,
         }
     raise ValueError(f"unknown defense arm: {name!r}")

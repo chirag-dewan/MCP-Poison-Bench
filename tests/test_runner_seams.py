@@ -118,6 +118,7 @@ def _drive_run(
     call_policy=None,
     tool_transform=None,
     pinning_findings=None,
+    confirm_prompts=None,
     relist_each_step: bool = False,
     task: dict[str, Any] = TASK,
     result_text: str = "raw result",
@@ -155,6 +156,7 @@ def _drive_run(
         result_findings=result_findings,
         call_policy=call_policy,
         pinning_findings=pinning_findings,
+        confirm_prompts=confirm_prompts,
         relist_each_step=relist_each_step,
     ))
     assert not scripted
@@ -281,6 +283,51 @@ def test_denied_call_is_traced_but_never_dispatched(monkeypatch):
     assert policy_contexts[0]["tool_use_id"] == "call-1"
     assert policy_contexts[0]["task"] == TASK
     assert policy_contexts[0]["history"][-1]["role"] == "assistant"
+
+
+@pytest.mark.parametrize("allow", [True, False], ids=["allowed", "denied"])
+def test_confirmation_prompt_is_traced_for_allowed_and_denied_calls(
+    monkeypatch, allow,
+):
+    prompts = []
+
+    def decide(name, tool_input, ctx):
+        prompts.append({
+            "step": ctx["step"],
+            "tool_name": name,
+            "tool_input": copy.deepcopy(tool_input),
+            "taints": ["secret"],
+            "decision": "allow" if allow else "deny",
+        })
+        return runner.PolicyDecision(allow, "simulated confirmation")
+
+    trace, session, _completions = _drive_run(
+        monkeypatch,
+        tool_name="export_data",
+        call_policy=decide,
+        confirm_prompts=prompts,
+    )
+
+    types = [event["type"] for event in trace.events]
+    call_index = types.index("tool_call")
+    assert types[call_index + 1] == "confirm_prompt"
+    if allow:
+        assert session.calls == [("export_data", {"value": 7})]
+        assert types[call_index + 2] == "tool_result"
+    else:
+        assert session.calls == []
+        assert types[call_index + 2:call_index + 4] == [
+            "blocked_tool_call", "tool_result",
+        ]
+    prompt = trace.events[call_index + 1]
+    assert prompt == {
+        "type": "confirm_prompt",
+        "step": 0,
+        "tool_name": "export_data",
+        "tool_input": {"value": 7},
+        "taints": ["secret"],
+        "decision": "allow" if allow else "deny",
+    }
 
 
 def test_allowed_call_dispatches_and_records_blocked_false(monkeypatch):
