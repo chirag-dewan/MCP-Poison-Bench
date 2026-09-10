@@ -26,12 +26,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import copy
 import json
 import os
 import random
 import subprocess
 import sys
 from contextlib import AsyncExitStack
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -49,6 +51,26 @@ MAX_TOKENS = 1024
 #: A defense layer (M3) sets this to rewrite the tool list before the model sees
 #: it. Signature: (list[anthropic_tool_dict]) -> list[anthropic_tool_dict].
 ToolTransform = Callable[[list[dict[str, Any]]], list[dict[str, Any]]]
+
+#: Rewrites one tool result before it is returned to the model. The raw result
+#: remains in the trace for scoring and audit.
+ResultTransform = Callable[[str, str, dict[str, Any]], str]
+
+
+@dataclass(frozen=True)
+class PolicyDecision:
+    """Client-side decision made before a requested tool call is dispatched."""
+
+    allow: bool
+    reason: str
+    rule: str | None = None
+
+
+#: Decides whether a model-requested tool call may reach its owning MCP server.
+CallPolicy = Callable[[str, dict[str, Any], dict[str, Any]], PolicyDecision]
+
+#: Stable model-facing result for calls denied by ``CallPolicy``.
+BLOCKED_TOOL_CALL_MESSAGE = "Error: call to '{tool}' was blocked by client policy."
 
 
 def _git_sha() -> str:
@@ -106,6 +128,8 @@ async def run(
     server_env: dict[str, str] | None = None,
     temperature: float = 1.0,
     tool_transform: ToolTransform | None = None,
+    result_transform: ResultTransform | None = None,
+    call_policy: CallPolicy | None = None,
 ) -> dict[str, Any]:
     """Run `task` against `model` with `server_paths` launched as MCP servers.
 
@@ -132,6 +156,7 @@ async def run(
 
         # Merge tools across servers, routing each name to its owning session.
         tool_owner: dict[str, ClientSession] = {}
+        tool_server_path: dict[str, str] = {}
         merged_tools = []
         listed_events = []
         for sp, session in zip(server_paths, sessions):
@@ -145,6 +170,7 @@ async def run(
                     })
                     continue
                 tool_owner[t.name] = session
+                tool_server_path[t.name] = str(sp)
                 merged_tools.append(t)
             listed_events.append({
                 "server_path": str(sp),
@@ -163,6 +189,8 @@ async def run(
         trace.write({
             "type": "mcp_list_tools",
             "defended": defended,
+            "result_transform_on": result_transform is not None,
+            "call_policy_on": call_policy is not None,
             "servers": listed_events,
             "tools_offered_to_model": anthropic_tools,
         })
@@ -172,6 +200,7 @@ async def run(
         trace.write({"type": "user_prompt", "content": task["prompt"], "system": system})
 
         final_text: str | None = None
+        truncated = False
         step = 0
         for step in range(MAX_STEPS):
             resp = clients.complete(
@@ -186,6 +215,14 @@ async def run(
                 "content": resp.content,
             })
             messages.append({"role": "assistant", "content": resp.content})
+
+            if resp.stop_reason == "max_tokens":
+                truncated = True
+                trace.write({
+                    "type": "warning",
+                    "message": "output truncated at MAX_TOKENS",
+                    "step": step,
+                })
 
             if resp.stop_reason != "tool_use":
                 final_text = "".join(
@@ -203,7 +240,35 @@ async def run(
                     "tool_input": tool_input, "tool_use_id": tuid,
                 })
                 session = tool_owner.get(name)
-                if session is None:
+                server_path = tool_server_path.get(name)
+                blocked = False
+                if call_policy is not None:
+                    decision = call_policy(name, tool_input, {
+                        "step": step,
+                        "tool_use_id": tuid,
+                        "server_path": server_path,
+                        "task": task,
+                        # A defensive copy preserves the runner's history even if
+                        # a policy accidentally mutates the read-only snapshot.
+                        "history": copy.deepcopy(messages),
+                    })
+                    if not decision.allow:
+                        blocked = True
+                        trace.write({
+                            "type": "blocked_tool_call",
+                            "step": step,
+                            "tool_use_id": tuid,
+                            "tool_name": name,
+                            "tool_input": tool_input,
+                            "reason": decision.reason,
+                            "rule": decision.rule,
+                        })
+
+                if blocked:
+                    result_text, is_error, raw = (
+                        BLOCKED_TOOL_CALL_MESSAGE.format(tool=name), True, [],
+                    )
+                elif session is None:
                     result_text, is_error, raw = (
                         f"Error: unknown tool {name!r}", True, [],
                     )
@@ -214,13 +279,27 @@ async def run(
                     result_text = "\n".join(
                         getattr(c, "text", str(c)) for c in mcp_result.content
                     )
+
+                transformed_text = result_text
+                result_was_transformed = False
+                if result_transform is not None and session is not None and not blocked:
+                    transformed_text = result_transform(name, result_text, {
+                        "server_path": server_path or "",
+                        "step": step,
+                        "tool_use_id": tuid,
+                        "is_error": is_error,
+                    })
+                    result_was_transformed = True
                 trace.write({
                     "type": "tool_result", "step": step, "tool_use_id": tuid,
                     "tool_name": name, "is_error": is_error, "content": raw,
+                    "content_transformed": transformed_text,
+                    "result_transformed": result_was_transformed,
+                    "blocked": blocked,
                 })
                 tool_results_payload.append({
                     "type": "tool_result", "tool_use_id": tuid,
-                    "content": result_text, "is_error": is_error,
+                    "content": transformed_text, "is_error": is_error,
                 })
             messages.append({"role": "user", "content": tool_results_payload})
         else:
@@ -234,6 +313,7 @@ async def run(
             "temperature": temperature,
             "final_text": final_text,
             "steps": step + 1,
+            "truncated": truncated,
         }
         trace.write(summary)
         return summary
@@ -250,6 +330,8 @@ def run_trial(
     extra_config: dict[str, Any] | None = None,
     results_dir: Path = RESULTS_DIR,
     tool_transform: ToolTransform | None = None,
+    result_transform: ResultTransform | None = None,
+    call_policy: CallPolicy | None = None,
 ) -> tuple[dict[str, Any], Path]:
     """Run one trial end to end (own event loop) and return (summary, trace_path).
 
@@ -279,6 +361,8 @@ def run_trial(
             server_paths, task, model, seed, trace,
             server_env=server_env, temperature=temperature,
             tool_transform=tool_transform,
+            result_transform=result_transform,
+            call_policy=call_policy,
         ))
     finally:
         trace.close()
