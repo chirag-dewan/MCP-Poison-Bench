@@ -76,7 +76,7 @@ Real-client external validity is explicitly deferred rather than asserted.
 ## Definition of a result (the core tables)
 
 **Two** tables, reported side by side: rows = (model × attack class), columns =
-ASR-baseline / ASR-defended / utility, over N seeded trials with Wilson CIs — one
+ASR-baseline / ASR-defended / utility, over N repeated trials with Wilson CIs — one
 for the **held-out** payload register (the de-circularized headline) and one for the
 **seen** register (the near-circular contrast). The contribution is that pair plus
 the methodology that separates them, the released harness, and the labeled,
@@ -104,7 +104,7 @@ CI-gated payload dataset — not a defense that "works."
 ```
 mcp-poison-bench/
   CLAUDE.md            # scoped-agent scaffold + conventions (like your site repo)
-  SPEC.md              # this file
+  spec.md              # this file
   servers/
     benign/            # baseline well-behaved MCP servers
     poisoned/          # attack-class variants (parametrized payloads)
@@ -117,7 +117,7 @@ mcp-poison-bench/
     utility.py         # did the benign task complete?
   defense/
     provenance.py      # provenance tagging + static metadata validation
-  results/             # seeded run outputs, tables, traces
+  results/             # replicate run outputs, tables, traces
   run_all.sh           # one-command reproduction
 ```
 
@@ -128,7 +128,7 @@ mcp-poison-bench/
   one benign task and one attack attempt, and prints ASR for n=1. Prove the loop
   before scaling it.
 - **M2 — full attack matrix:** all 4 attack classes, parametrized payloads,
-  automated trials over N seeds, 2–3 models, baseline ASR + utility table.
+  automated trials over N replicate identifiers, 2–3 models, baseline ASR + utility table.
 - **M3 — defense:** provenance/validation layer, measure ASR reduction + utility
   retention against the M2 matrix.
 - **M4 — ship:** arXiv preprint + cdewan.me writeup + GitHub release; coordinated
@@ -145,9 +145,9 @@ mcp-poison-bench/
 - Note CFAA / legal-risk considerations (cite "Legal Risks of Adversarial ML
   Research," arXiv:2006.16179). Scope everything to authorized, local targets.
 
-## Claude Code usage (disclose in the paper)
+## LLM-assisted development (disclose in the paper)
 
-Built with Claude Code as the accelerant. Keep CLAUDE.md current; generate seeded,
-deterministic experiment scripts; have a subagent draft the results section from
-logs; run an adversarial self-review pass on the draft before submission. S&P and
-SaTML require an LLM-usage disclosure section — write it as you go.
+Built with Claude Code and OpenAI Codex as engineering accelerants. Keep CLAUDE.md
+current; generate traceable, repeatable experiment scripts; have a subagent draft the
+results section from logs; run an adversarial self-review pass on the draft before
+submission. S&P and SaTML require an LLM-usage disclosure section — write it as you go.

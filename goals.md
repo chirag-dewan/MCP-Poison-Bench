@@ -93,13 +93,13 @@ Hypotheses (state them; let the data answer):
 
 ## 3. Success criteria (v2 is "done" when)
 
-- [ ] The runner exposes two new seams — `result_transform` and `call_policy` —
-      each a pure callable toggled exactly like `tool_transform`.
-- [ ] The OpenAI-compatible adapter surfaces truncation (`finish_reason == "length"`
+- [x] The runner exposes two new seams — `result_transform` and `call_policy` —
+      each a narrow callable extension point toggled exactly like `tool_transform`.
+- [x] The OpenAI-compatible adapter surfaces truncation (`finish_reason == "length"`
       → `stop_reason == "max_tokens"`) and the sweep counts it.
-- [ ] Sampling parameters are gated per model so current frontier models that reject
+- [x] Sampling parameters are gated per model so current frontier models that reject
       `temperature` do not 400; the trace records what was actually sent.
-- [ ] `scorer/asr_v2.py` reports `attempted`, `realized`, `blocked`,
+- [x] `scorer/asr_v2.py` reports `attempted`, `realized`, `blocked`,
       `canary_exfiltrated` per trace, with tests.
 - [ ] Every arm in §1 is implemented as a composable toggle with a `--defense-arm`
       flag, and `--defense` remains a back-compatible alias for `meta_filter`.
@@ -109,9 +109,9 @@ Hypotheses (state them; let the data answer):
 - [ ] `config/v2/` grids + `run_v2.sh` + `aggregate_v2.py` produce the ablation
       matrix under `results/v2-<date>/`, and `RESULTS-v2.md` reports it without
       editorializing past the CIs.
-- [ ] `CLAUDE.md` exists in the repo (tracked) and matches what the docstrings
+- [x] `CLAUDE.md` exists in the repo (tracked) and matches what the docstrings
       already claim it says.
-- [ ] Offline test count grows; nothing existing breaks.
+- [x] Offline test count grows; nothing existing breaks.
 
 ---
 
@@ -125,8 +125,8 @@ Hypotheses (state them; let the data answer):
 6. `prompts/06` — second objective family, more tasks, more n
 7. `prompts/07` — v2 configs, driver, aggregator, ablation report
 8. `prompts/08` — (optional) LLM-judge detector arm
-9. `prompts/09` — finish the 2026-07 roster refresh (independent of v2; keep on
-   its own branch so the re-run stays a pure re-run)
+9. `prompts/09` — finish the 2026-07 roster refresh (developed independently;
+   integrated executions must record the corrected-harness deviation described in §6)
 
 ---
 
@@ -144,7 +144,9 @@ Hypotheses (state them; let the data answer):
 - v1 = `master` as of the v1 tag. Tag it (`v1.0`) before v2 work starts.
 - Each prompt runs on its own branch off `master`: `v2/01-seams`, `v2/02-policy`,
   … and lands by PR. Never stack unmerged branches unless a prompt says so.
-- The 2026-07 roster refresh stays on `claude/mcp-poison-bench-roster-refresh-*`
-  and writes to `results/2026-07-refresh/`. It must not absorb v2 changes.
-- Every run directory carries a `RUN.md` with: git SHA, roster, arms, seeds,
+- The 2026-07 roster refresh was developed on
+  `claude/mcp-poison-bench-roster-refresh-*`. After integration, executions use the
+  current corrected harness, write to `results/2026-07-refresh/`, and must disclose the
+  git SHA and harness deviations rather than claim a byte-identical roster-only rerun.
+- Every new publishable run directory carries a `RUN.md` with: git SHA, roster, arms, seeds,
   payload registers, date, and any deviations.

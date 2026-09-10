@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # De-circularization run: held-out vs seen payloads, baseline vs defended, on the
 # 3 Anthropic models, over the multi-step tasks. Produces separate, labeled
-# matrices. See GAPS/the held-out payload set for why this exists.
+# matrices. See README.md's held-out methodology for why this exists.
 #
 # Reproduce:  ./run_decirc.sh
 set -euo pipefail
@@ -13,8 +13,8 @@ if [[ -f .env ]]; then set -a; source .env; set +a; fi
 R=results
 mkdir -p "$R"
 
-# Resumable: skip a sweep whose output already exists (so a mid-run failure or a
-# rerun does not re-spend API budget on completed sweeps). Delete the file to force.
+# File-granular restart: any nonempty output is treated as complete and skipped.
+# Inspect partial/error outputs and delete them explicitly before rerunning.
 run_sweep () {  # $1=label  $2=outfile  $3...=sweep args
   local label="$1" out="$2"; shift 2
   if [[ -s "$out" ]]; then echo "==> $label  SKIP (exists: $out, $(wc -l < "$out") lines)"; return; fi

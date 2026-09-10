@@ -3,13 +3,13 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>MCP-Poison-Bench — built, measured, and broken</title>
-<meta name="description" content="A reproducible MCP tool-poisoning benchmark across four attack classes, six models, and three vendors — with a de-circularized test showing a client-side metadata defense is structurally blind to rug-pull injection. Controlled harness." />
+<title>MCP-Poison-Bench — published v1 results</title>
+<meta name="description" content="Published v1 results from a reproducible MCP tool-poisoning benchmark across four attack classes, six models, and three vendors — with a de-circularized test showing a client-side metadata defense is structurally blind to rug-pull injection. Controlled harness." />
 <!-- Web fonts: Space Mono (display) + JetBrains Mono (body/code). Degrades to a
      monospace stack offline; the page is otherwise fully self-contained. -->
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400&amp;family=Space+Mono:wght@400;700&amp;display=swap" rel="stylesheet" />
 <style>
   :root {
     --bg: #0a0a0a;
@@ -262,7 +262,7 @@
     <span class="brand">mcp-poison-bench</span>
     <nav class="bar-links">
       <a href="#results">results</a>
-      <a href="#defense">defense</a>
+      <a href="#how">method</a>
       <a href="#limits">limits</a>
       <a href="https://www.cdewan.me/projects/mcp-poison-bench-demo.html">demo</a>
       <a href="https://github.com/chirag-dewan/MCP-Poison-Bench">github&nbsp;↗</a>
@@ -273,7 +273,7 @@
 <!-- 1. HERO -->
 <div class="hero">
   <div class="wrap">
-    <div class="mono-label">defensive security research · MCP trust boundary</div>
+    <div class="mono-label">published v1 · defensive security research · MCP trust boundary</div>
     <h1 style="margin-top:14px">MCP-Poison-Bench<span class="blink">_</span></h1>
     <p class="thesis">
       A reproducible benchmark for MCP tool-poisoning across <b>four attack classes,
@@ -298,9 +298,9 @@
 <section id="novelty">
   <div class="wrap">
     <div class="sec-head">
-      <h2>The gap this closes</h2>
-      <p>Prior MCP-security work either <i>measures the attack</i> or <i>proposes a
-         defense</i>. None build one, measure it, and then try to break it. This does.</p>
+      <h2>The comparison this adds</h2>
+      <p>This benchmark combines three steps in one controlled study: implement a
+         recommended defense, measure it, and adversarially test its assumptions.</p>
     </div>
     <table class="matrix">
       <thead>
@@ -338,7 +338,7 @@
     </table>
     <div class="novelty-note">
       We implement the static-metadata-validation pass Huang et al. <i>recommend</i>,
-      then do the thing most defense papers skip: <b>de-circularize the evaluation</b>.
+      then <b>de-circularize its evaluation</b> against an independently authored register.
       The defense's apparent win came from attack payloads that shared its own keyword
       vocabulary. We re-test on a <b>held-out payload set authored to trip zero defense
       rules</b> (CI-enforced) and find the reduction largely vanishes — and that the one
@@ -353,8 +353,8 @@
 <section id="results">
   <div class="wrap">
     <div class="sec-head">
-      <h2>Headline results</h2>
-      <p>4 attack classes × 6 models × 3 vendors (Anthropic, OpenAI, DeepSeek),
+      <h2>Published v1 results</h2>
+      <p>These measurements are the published v1 matrix: 4 attack classes × 6 models × 3 vendors (Anthropic, OpenAI, DeepSeek),
          temperature 1.0, held-out vs seen payloads, 95% Wilson intervals. ~2,500
          scored trials; errored trials excluded, never counted as misses.</p>
     </div>
@@ -368,9 +368,9 @@
       </div>
       <div class="card bad">
         <div class="n">gpt-4o-mini</div>
-        <div class="k">the worst model — fires on rug_pull at
-          <b style="color:var(--text)">0.61</b> held-out / 1.00 seen, and is the only
-          model to fire across multiple classes.</div>
+        <div class="k">the most susceptible model — fires on rug_pull at
+          <b style="color:var(--text)">0.61</b> held-out / 1.00 seen and across all four
+          seen-register classes.</div>
       </div>
       <div class="card bad">
         <div class="n">1.00 → 1.00</div>
@@ -462,7 +462,7 @@
         <!-- node 3 model -->
         <rect x="330" y="80" width="140" height="54" rx="6" fill="#161616" stroke="#2a2a2a"/>
         <text x="400" y="104" text-anchor="middle" fill="#e6e6e6" font-size="13" font-weight="700">model</text>
-        <text x="400" y="121" text-anchor="middle" fill="#7a7a7a" font-size="10.5">3 frontier models</text>
+        <text x="400" y="121" text-anchor="middle" fill="#7a7a7a" font-size="10.5">6 benchmark models</text>
         <!-- node 4 trace -->
         <rect x="490" y="80" width="140" height="54" rx="6" fill="#161616" stroke="#2a2a2a"/>
         <text x="560" y="104" text-anchor="middle" fill="#e6e6e6" font-size="13" font-weight="700">JSONL trace</text>
@@ -476,7 +476,7 @@
         <text x="880" y="104" text-anchor="middle" fill="#e6e6e6" font-size="13" font-weight="700">matrix + delta</text>
         <text x="880" y="121" text-anchor="middle" fill="#5a8a5a" font-size="10.5">Wilson CIs</text>
         <!-- toggle annotation -->
-        <text x="240" y="156" text-anchor="middle" font-size="11"><tspan fill="#ff3333">OFF → fires</tspan><tspan fill="#6a6a6a">　·　</tspan><tspan fill="#00ff41">ON → blocked</tspan></text>
+        <text x="240" y="156" text-anchor="middle" font-size="11"><tspan fill="#ff3333">OFF → raw metadata</tspan><tspan fill="#6a6a6a">　·　</tspan><tspan fill="#00ff41">ON → transform metadata</tspan></text>
       </svg>
       <div class="dcap">The defense toggle is the only thing that changes between a baseline and a defended run. Scorers read the trace — never a live model or server.</div>
     </div>
@@ -598,7 +598,7 @@
       <b>Use only against systems you own or are authorized to test.</b>
     </div>
     <div class="foot-meta">
-      <span>MCP-Poison-Bench — built with Claude Code; every claim verified at the trace level.</span>
+      <span>MCP-Poison-Bench — built with Claude Code and OpenAI Codex; reported measurements checked against saved traces.</span>
       <span>© 2026 Chirag Dewan · MIT</span>
     </div>
   </div>

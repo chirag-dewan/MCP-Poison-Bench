@@ -2,8 +2,8 @@
 
 MCP-Poison-Bench is a **defensive-security research benchmark**. It contains controlled,
 **defanged** tool-poisoning fixtures (a local no-op sink tool and a synthetic token) used
-to measure how models acting as MCP clients handle untrusted server metadata, and to
-evaluate a client-side defense.
+to measure how models acting as MCP clients handle untrusted server metadata and results,
+and to evaluate client-side defenses.
 
 ## Acceptable use
 
@@ -18,8 +18,8 @@ evaluate a client-side defense.
 
 If you find a security issue **in this repository** (e.g. an accidentally-committed
 secret, or a fixture that is not actually defanged), please open a GitHub issue for
-non-sensitive reports, or contact the maintainer privately via the contact on
-[cdewan.me](https://cdewan.me) for anything sensitive. Please do not include working
+non-sensitive reports. For sensitive findings, use GitHub's private vulnerability
+reporting flow from the repository's **Security** tab. Please do not include working
 exploit payloads in public issues.
 
 If your finding concerns a **third-party MCP client, host, or model** that you discovered

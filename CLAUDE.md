@@ -40,7 +40,7 @@ existing offline test must remain green.
 ## Runner seams
 
 All arms are composed at the sweep layer and passed into `harness.runner` as
-pure callables. `None` means the seam is off.
+narrow callables. `None` means the seam is off.
 
 - `ToolTransform(tools) -> tools` rewrites the model-facing tool list once,
   immediately after MCP discovery. Raw server metadata remains in the trace.

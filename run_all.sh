@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-command reproduction of the full benchmark.
+# One-command reproduction of the original single-config Anthropic benchmark.
 # Owned by agent:harness. See CLAUDE.md for scope rules.
 #
 #   1. unit tests (scorers + Wilson CI math)        — fast, no API calls

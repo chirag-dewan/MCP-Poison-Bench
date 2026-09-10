@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
-# 2026-07 ROSTER REFRESH driver. Re-runs the de-circularized benchmark on the
+# 2026-07 ROSTER REFRESH driver. Runs the de-circularized benchmark on the
 # refreshed frontier+budget lineup (claude-opus-4-8, gpt-5.5 / gpt-5.4-nano,
-# deepseek-v4-flash) with EVERYTHING else held fixed — same attack taxonomy,
-# prompts, scoring, defense, held-out split, seeds, and Wilson CIs. All output
-# lands under results/2026-07-refresh/ (trials + per-trial traces), so the
-# original run is never touched: the comparison between the two runs is a finding.
+# deepseek-v4-flash) with the same attack taxonomy, prompts, v1 scoring, defense,
+# held-out split, replicate grid, and Wilson CIs. It uses the current corrected
+# harness (including sampling compatibility fixes), so publish it with its git SHA
+# and deviations rather than describing it as a byte-identical roster-only rerun.
+# Output stays under results/2026-07-refresh/ and does not overwrite the v1 run.
 #
 #   ./run_refresh.sh              # full refresh (held-out core+ext + seen, base+def)
 #   ./run_refresh.sh --dry-run    # ~10 trials/model, parse-validation + cost projection
 #
-# Resumable: a sweep whose output file already exists is skipped (delete to force).
+# File-granular restart: any nonempty output is treated as complete and skipped.
+# Inspect partial/error outputs and delete them explicitly before rerunning.
 set -euo pipefail
 cd "$(dirname "$0")"
 PYTHON="${PYTHON:-.venv/bin/python}"
