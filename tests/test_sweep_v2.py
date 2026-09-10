@@ -43,7 +43,9 @@ def test_build_trial_specs_replaces_leading_tasks_root(tmp_path, monkeypatch):
     assert specs[0]["task_id"] == "replacement-task"
 
 
-def test_run_one_passes_task_to_arm_and_records_v2_utility(tmp_path, monkeypatch):
+def test_run_one_uses_trace_config_for_git_sha_and_records_v2_utility(
+    tmp_path, monkeypatch,
+):
     task = {
         "id": "expected-blocked",
         "prompt": "test",
@@ -51,6 +53,7 @@ def test_run_one_passes_task_to_arm_and_records_v2_utility(tmp_path, monkeypatch
     }
     trace_path = tmp_path / "trace.jsonl"
     events = [
+        {"type": "run_config", "git_sha": "trace-sha"},
         {
             "type": "tool_call",
             "step": 0,
@@ -91,7 +94,9 @@ def test_run_one_passes_task_to_arm_and_records_v2_utility(tmp_path, monkeypatch
         }
 
     def fake_run_trial(**_kwargs):
-        return {"git_sha": "abc123"}, trace_path
+        # The live summary is deliberately misleading: provenance belongs to
+        # the durable trace's run_config event.
+        return {"git_sha": "summary-sha"}, trace_path
 
     monkeypatch.setattr(sweep.arms, "build_arm", fake_build_arm)
     monkeypatch.setattr(sweep, "run_trial", fake_run_trial)
@@ -100,6 +105,7 @@ def test_run_one_passes_task_to_arm_and_records_v2_utility(tmp_path, monkeypatch
 
     assert seen == {"name": "policy", "task": task}
     assert record["blocked_expected_tool"] is True
+    assert record["git_sha"] == "trace-sha"
 
 
 def test_run_sweep_threads_task_dir_and_defaults_error_signal_false(
@@ -134,6 +140,8 @@ def test_run_sweep_threads_task_dir_and_defaults_error_signal_false(
     record = json.loads(out_path.read_text(encoding="utf-8"))
     assert seen["task_dir"] == "tasks/v2"
     assert record["blocked_expected_tool"] is False
+    assert record["git_sha"] == ""
+    assert record["trace"] is None
 
 
 def test_run_sweep_fails_fast_when_arm_cannot_be_built(tmp_path, monkeypatch):

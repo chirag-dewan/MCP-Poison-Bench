@@ -6,9 +6,9 @@ scores each trace, and appends one compact per-trial record to
 into `results/matrix.csv`. See CLAUDE.md for scope rules.
 
 Each trial is fully isolated (its own MCP server subprocesses + event loop), so we
-fan out across a bounded thread pool for wall-clock speed without affecting
-per-trial determinism. Trial records are sorted before writing so the file order
-is stable regardless of completion order.
+fan out across a bounded thread pool for wall-clock speed while preserving
+per-trial runner/server isolation. Trial records are sorted before writing, so
+file order is stable regardless of completion order.
 
 Server selection per attack class:
   * cross_server -> [benign_server, poisoned_server], poisoned launched with
@@ -164,7 +164,7 @@ def _run_one(
         arm_name = defense_arm
     arm = arms.build_arm(arm_name, task)
     defended = arm_name != "none"
-    summary, trace_path = run_trial(
+    _summary, trace_path = run_trial(
         server_paths=spec["servers"],
         task=task,
         model=spec["model"],
@@ -187,6 +187,9 @@ def _run_one(
     # Scorers read the written trace (scorer reads traces, not live runs).
     from scorer.asr import load_trace
     events = load_trace(trace_path)
+    run_config = next(
+        (event for event in events if event.get("type") == "run_config"), {}
+    )
     asr = score_asr(events)
     asr_v2 = score_asr_v2(events)
     util = score_utility_v2(events, task)
@@ -219,7 +222,7 @@ def _run_one(
         "out_tokens": out_tok,
         "reasoning_tokens": reason_tok,
         "empty_output": _is_empty_output(events),
-        "git_sha": summary.get("git_sha", ""),
+        "git_sha": run_config.get("git_sha", ""),
         "trace": str(trace_ref),
     }
 
@@ -346,7 +349,10 @@ def run_sweep(
                     "utility_ok": False, "blocked_expected_tool": False,
                     "in_tokens": 0, "out_tokens": 0,
                     "reasoning_tokens": 0, "empty_output": False,
-                    "error": repr(exc), "trace": None,
+                    # A failed future does not expose run_trial's trace path or
+                    # run_config. Keep the record schema explicit without
+                    # attributing the run to the sweep process's current HEAD.
+                    "git_sha": "", "error": repr(exc), "trace": None,
                 }
                 print(f"  ! trial errored {s['model']}/{s['attack_class']}/{s['task_id']}/"
                       f"{s['payload_id']}/seed{s['seed']}: {exc!r}")

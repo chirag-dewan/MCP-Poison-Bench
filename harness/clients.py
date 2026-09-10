@@ -4,8 +4,8 @@ Owned by agent:harness. Pure wiring — no scoring logic, no defense logic, no
 server-side state. The defense layer plugs in by passing a `tool_transform`
 callable into the runner that rewrites the tool list before it reaches the model.
 
-ModelClient
------------
+Provider-neutral interface
+--------------------------
 `complete(model, system, messages, tools, ...)` is the single provider-agnostic
 interface. It dispatches on the model-id PREFIX and always returns the canonical
 form — `ModelResponse` with Anthropic-shaped content blocks (text + tool_use):

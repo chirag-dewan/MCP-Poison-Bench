@@ -9,6 +9,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 from fixtures.payloads import CANARY, SINK_TOOL_NAME
 from harness import clients, runner
 from harness.arms import build_arm
@@ -352,3 +354,113 @@ def test_run_trial_creates_nested_unique_trace_paths(monkeypatch, tmp_path):
     assert first != second
     assert "-held-1-policy-" in first.name
     assert "-held-2-policy-" in second.name
+
+
+def test_trace_writer_hook_matches_serialized_lines_in_write_order(tmp_path):
+    trace_path = tmp_path / "trace.jsonl"
+    observed: list[dict[str, Any]] = []
+
+    def observe(event: dict[str, Any]) -> None:
+        # The corresponding line is flushed before the synchronous callback runs.
+        lines = trace_path.read_text(encoding="utf-8").splitlines()
+        assert json.loads(lines[-1]) == event
+        observed.append(copy.deepcopy(event))
+
+    trace = runner.TraceWriter(trace_path, on_event=observe)
+    try:
+        trace.write({"type": "first", "content": FakeContent("serialized")})
+        trace.write({"type": "second", "ordinal": 2})
+    finally:
+        trace.close()
+
+    persisted = [
+        json.loads(line)
+        for line in trace_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert observed == persisted == [
+        {"type": "first", "content": {"type": "text", "text": "serialized"}},
+        {"type": "second", "ordinal": 2},
+    ]
+
+
+def test_run_trial_forwards_hook_for_every_event(monkeypatch, tmp_path):
+    async def fake_run(
+        _server_paths, _task, _model, _seed, trace, **_kwargs,
+    ):
+        summary = {"type": "summary", "truncated": False}
+        trace.write(summary)
+        return summary
+
+    observed: list[dict[str, Any]] = []
+    monkeypatch.setattr(runner, "run", fake_run)
+    monkeypatch.setattr(runner, "_utc_stamp", lambda: "20260910T120000Z")
+    monkeypatch.setattr(runner, "_git_sha", lambda: "canonical-sha")
+
+    summary, trace_path = runner.run_trial(
+        server_paths=[SERVER_PATH],
+        task=TASK,
+        model="claude-test",
+        seed=7,
+        results_dir=tmp_path,
+        extra_config={
+            "git_sha": "spoofed-sha",
+            "task_id": "spoofed-task",
+            "model": "spoofed-model",
+            "seed": 999,
+            "started_at": "spoofed-time",
+            "custom_field": "preserved",
+        },
+        on_event=lambda event: observed.append(copy.deepcopy(event)),
+    )
+
+    persisted = [
+        json.loads(line)
+        for line in trace_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert summary == {"type": "summary", "truncated": False}
+    assert observed == persisted
+    assert [event["type"] for event in observed] == ["run_config", "summary"]
+    assert observed[0]["git_sha"] == "canonical-sha"
+    assert observed[0]["task_id"] == TASK["id"]
+    assert observed[0]["model"] == "claude-test"
+    assert observed[0]["seed"] == 7
+    assert observed[0]["started_at"] != "spoofed-time"
+    assert observed[0]["custom_field"] == "preserved"
+
+
+def test_run_config_hook_exception_is_fatal_and_closes_trace(monkeypatch, tmp_path):
+    created: list[runner.TraceWriter] = []
+    real_trace_writer = runner.TraceWriter
+
+    class RecordingTraceWriter(real_trace_writer):
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__(*args, **kwargs)
+            created.append(self)
+
+    async def run_must_not_start(*_args, **_kwargs):
+        raise AssertionError("run should not start after the run_config hook fails")
+
+    def fail_on_event(event: dict[str, Any]) -> None:
+        assert event["type"] == "run_config"
+        raise RuntimeError("observer failed")
+
+    monkeypatch.setattr(runner, "TraceWriter", RecordingTraceWriter)
+    monkeypatch.setattr(runner, "run", run_must_not_start)
+
+    with pytest.raises(RuntimeError, match="observer failed"):
+        runner.run_trial(
+            server_paths=[SERVER_PATH],
+            task=TASK,
+            model="claude-test",
+            seed=7,
+            results_dir=tmp_path,
+            on_event=fail_on_event,
+        )
+
+    assert len(created) == 1
+    assert created[0]._fh.closed is True
+    persisted = [
+        json.loads(line)
+        for line in created[0].path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert [event["type"] for event in persisted] == ["run_config"]

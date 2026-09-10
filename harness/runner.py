@@ -18,9 +18,10 @@ Writes JSONL to results/<utc>-<task_id>-seed<N>.jsonl. One event per line:
 run_config, mcp_initialize, mcp_list_tools, user_prompt, assistant_message,
 tool_call, tool_result, summary.
 
-Determinism note: --seed seeds Python RNG and is logged into every trace. ASR is a
-*rate*, so the sweep samples at temperature>0 to get genuine Bernoulli trials;
-temperature is logged. Traces are stored verbatim for re-analysis.
+Replicate note: --seed is a stable trial identifier recorded in every trace; the
+provider APIs do not receive it as a deterministic sampling seed. ASR is a *rate*,
+so the sweep samples at temperature>0 to obtain repeated Bernoulli trials;
+temperature and raw trace events are retained for re-analysis.
 """
 from __future__ import annotations
 
@@ -29,7 +30,6 @@ import asyncio
 import copy
 import json
 import os
-import random
 import subprocess
 import sys
 from contextlib import AsyncExitStack
@@ -72,11 +72,11 @@ CallPolicy = Callable[[str, dict[str, Any], dict[str, Any]], PolicyDecision]
 #: Stable model-facing result for calls denied by ``CallPolicy``.
 BLOCKED_TOOL_CALL_MESSAGE = "Error: call to '{tool}' was blocked by client policy."
 
-#: An optional live capture hook. The runner calls it with each trace event
-#: (already JSON-serialized, identical to the on-disk line) at the moment the
-#: event is written, so downstreams can observe runs in real time without
-#: re-reading the trace file. Used by the mcp-telemetry sibling project to stamp
-#: true per-call timestamps and capture full, untruncated tool results live.
+#: An optional synchronous live capture hook. The runner invokes it in trace
+#: order, after flushing the same JSON-safe event to disk. Exceptions propagate
+#: and abort the trial: silently dropping observer events would compromise trace
+#: integrity. A callback shared by concurrent trials must provide its own thread
+#: safety because each trial invokes it from its worker thread.
 EventHook = Callable[[dict[str, Any]], None]
 
 
@@ -113,9 +113,10 @@ def _serialize(obj: Any) -> Any:
 class TraceWriter:
     """Append-only JSONL writer for run traces.
 
-    If `on_event` is supplied, every written event is also handed to it live
-    (after the same JSON serialization used for the file), so observers see the
-    full, untruncated event the instant it is recorded.
+    If ``on_event`` is supplied, each full, untruncated event is serialized once,
+    flushed to disk, then handed to the callback synchronously and in write
+    order. Callback exceptions are fatal and propagate to the caller. Callbacks
+    reused across concurrent trials are responsible for their own thread safety.
     """
 
     def __init__(self, path: Path, on_event: EventHook | None = None) -> None:
@@ -355,10 +356,9 @@ def run_trial(
     Used by the sweep driver; each call is isolated (fresh servers + loop), so it
     is safe to invoke concurrently from a thread pool.
 
-    `on_event`, if given, receives every trace event live (see EventHook); the
-    trace file is still written exactly as before.
+    ``on_event``, if given, receives every trace event under the synchronous,
+    ordered, fatal-on-exception contract documented by :data:`EventHook`.
     """
-    random.seed(seed)
     results_dir.mkdir(parents=True, exist_ok=True)
     stamp = _utc_stamp()
     suffix_fields = ("attack_class", "payload_set", "payload_id", "defense_arm")
@@ -369,19 +369,19 @@ def run_trial(
     )
     trace_path = results_dir / f"{stamp}-{task['id']}{suffix}-{model}-seed{seed}.jsonl"
     trace = TraceWriter(trace_path, on_event=on_event)
-    trace.write({
-        "type": "run_config",
-        "task_id": task["id"],
-        "server_paths": [str(p) for p in server_paths],
-        "model": model,
-        "seed": seed,
-        "temperature": temperature,
-        "server_env": server_env or {},
-        "git_sha": _git_sha(),
-        "started_at": datetime.now(timezone.utc).isoformat(),
-        **(extra_config or {}),
-    })
     try:
+        trace.write({
+            **(extra_config or {}),
+            "type": "run_config",
+            "task_id": task["id"],
+            "server_paths": [str(p) for p in server_paths],
+            "model": model,
+            "seed": seed,
+            "temperature": temperature,
+            "server_env": server_env or {},
+            "git_sha": _git_sha(),
+            "started_at": datetime.now(timezone.utc).isoformat(),
+        })
         summary = asyncio.run(run(
             server_paths, task, model, seed, trace,
             server_env=server_env, temperature=temperature,
