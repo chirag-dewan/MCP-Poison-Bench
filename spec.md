@@ -40,13 +40,39 @@ metadata-borne injection it can read, but is **structurally blind** to result-bo
   payloads authored independently of its rules, or the result is an artifact of
   shared vocabulary. *Result: confirmed, and it is the core methodological point.*
 
+## v2 (planned/measured)
+
+v2 plans one held-out-first ablation matrix, with seen results reported separately:
+rows are model × attack class, columns are the ten defense arms, and cells report
+attempted and realized ASR, canary movement, and utility with 95% Wilson intervals.
+Inference is limited to inclusive confidence-interval overlap; endpoint contact counts
+as overlap.
+
+| item | planned | measured status |
+|---|---|---|
+| Matrix | `none`, `meta_filter`, `result_filter`, `meta_and_result_filter`, `pinning`, `policy`, `policy_full`, `confirm`, `confirm_ux`, and `model_hardening` across held-out and seen objectives | Not measured; no full v2 sweep has run. |
+| H5 | Test whether result-side filtering closes seen, but not held-out, rug-pull payloads. | Not measured. |
+| H6 | Test whether policy separates attempted from realized held-out ASR. | Not measured. |
+| H7 | Measure utility cost for capability-policy arms. | Not measured. |
+| H8 | Test metadata pinning against metadata drift and cross-server shadowing alongside result-side controls. | Not measured. |
+
+The v2 runner, arms, expanded objectives, grid, aggregation, and report generator are
+implementation artifacts, not measurements. A publishable run must record its roster,
+seeds, git SHA, errors, and truncation rates, and cannot be reported while selected-model
+pricing remains unconfirmed.
+
 ## Scope
 
-**In:** a controlled harness built on the MCP SDK + model APIs; 4 attack classes;
+**Published v1 scope:** a controlled harness built on the MCP SDK + model APIs; 4 attack classes;
 **6 models across 3 vendors** (Anthropic: Opus 4.8, Sonnet 4.6, Haiku 4.5; OpenAI:
 GPT-5.5, gpt-4o-mini; DeepSeek: deepseek-chat); seen + held-out payload registers;
 ASR + utility metrics; the recommended metadata defense and its de-circularized
 measurement. (Gemini was attempted but is credit-limited; not in the final matrix.)
+
+**Planned v2 measurement scope:** 5 attack classes and 3 attacker objectives across
+the 4-model refresh roster (Opus 4.8, GPT-5.5, gpt-5.4-nano, and
+deepseek-v4-flash), with all ten arms reported separately on seen and held-out
+registers. This is implemented but remains unmeasured.
 
 **Out:** real-client testing (Claude Desktop, Cursor, Cline, etc.) — a separate,
 ongoing project; novel zero-days fired at deployed products; anything outside the
@@ -64,6 +90,8 @@ Real-client external validity is explicitly deferred rather than asserted.
 3. **Rug-pull** — a tool benign at approval time, mutated by the server afterward.
 4. **Cross-server shadowing / toxic flow** — one server's tool overriding or
    redirecting another trusted server's behavior, or chaining to exfiltration.
+5. **Metadata drift** — a server mutating or shadowing previously observed tool
+   metadata after the client has pinned its first-seen view.
 
 ## Metrics
 

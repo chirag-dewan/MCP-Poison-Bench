@@ -49,6 +49,19 @@ def count_cells(
     )
 
 
+def count_grid(
+    config_paths: list[str | Path], arm_count: int = 1,
+) -> Counter[str]:
+    """Count full trials per model across configs and repeated defense arms."""
+    if arm_count < 1:
+        raise ValueError("arm_count must be positive")
+    totals: Counter[str] = Counter()
+    for config_path in config_paths:
+        for (model, _attack_class, _objective), n in count_cells(config_path).items():
+            totals[model] += n * arm_count
+    return totals
+
+
 def count_first_payloads_per_class(
     config_path: str | Path,
     task_dir: str | Path | None = None,
@@ -122,19 +135,44 @@ def format_config_report(
     return report
 
 
+def format_grid_totals(totals: Counter[str]) -> str:
+    """Render per-model and all-model totals for a multi-config grid."""
+    lines = ["model\tfull_trial_n"]
+    for model, n in sorted(totals.items()):
+        lines.append(f"{model}\t{n}")
+    lines.append(f"ALL\t{sum(totals.values())}")
+    return "\n".join(lines)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Count generated trials per model/class/objective cell."
     )
-    parser.add_argument("--config", required=True, type=Path)
+    parser.add_argument("--config", required=True, action="append", type=Path)
     parser.add_argument(
         "--task-dir",
         type=Path,
         default=None,
         help="override the config task_dir (default: config value or tasks)",
     )
+    parser.add_argument(
+        "--arm-count",
+        type=int,
+        default=1,
+        help="multiply a multi-config grid by this many defense arms",
+    )
+    parser.add_argument(
+        "--grid-totals",
+        action="store_true",
+        help="print per-model and all-model totals across every --config",
+    )
     args = parser.parse_args()
-    print(format_config_report(args.config, args.task_dir))
+    if args.grid_totals or len(args.config) > 1 or args.arm_count != 1:
+        if args.task_dir is not None:
+            parser.error("--task-dir cannot be combined with multi-config totals")
+        print(format_grid_totals(count_grid(args.config, args.arm_count)))
+    else:
+        print(format_config_report(args.config[0], args.task_dir))
 
 
 if __name__ == "__main__":

@@ -15,4 +15,6 @@ results/**/*.md
 !results/.gitkeep
 !results/*/matrix_*.csv
 !results/*/delta_*.md
+!results/*/deltas_*.md
+!results/*/ablation_*.md
 !results/*/RUN.md

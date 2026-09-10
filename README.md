@@ -23,6 +23,7 @@ controlled harness; no claim extends to production MCP clients.**
 - [Published v1 findings](#published-v1-findings)
 - [Published v1 results](#published-v1-results)
 - [Current implementation status](#current-implementation-status)
+- [v2](#v2)
 - [Install](#install)
 - [Usage](#usage)
 - [How it works](#how-it-works)
@@ -93,7 +94,8 @@ and on held-out payloads has little to reduce because little fires.
 
 ## Current implementation status
 
-The first two v2 implementation stages are complete and covered by offline tests:
+The v2 harness, defense arms, expanded objectives, experiment grid, and aggregate/report
+pipeline are implemented and covered by offline tests:
 
 - **Harness seams and correctness:** defense arms compose through three narrow runner
   seams: `tool_transform` for the discovered tool list, `result_transform` for the
@@ -111,11 +113,29 @@ The first two v2 implementation stages are complete and covered by offline tests
   truncation independently. `scorer/utility_v2.py` separately reports when policy blocks
   a task's expected tool.
 
-Available arms are `none`, `meta_filter` (the v1 metadata defense), `policy`, and
-`policy_full`. At this stage, `policy_full` is policy plus the v1 metadata filter; the
-result-side filter and the rest of the planned ablation arms are not implemented yet.
 **No full v2 sweep or v2 ablation matrix has been run or published.** The tables above
 remain the v1 record and should not be read as policy-arm results.
+
+## v2
+
+The v2 protocol and hypotheses are in [`goals.md`](goals.md). The resumable experiment
+entry point is [`run_v2.sh`](run_v2.sh); after an approved run and aggregation,
+[`scripts/results_v2_md.py`](scripts/results_v2_md.py) generates
+[`RESULTS-v2.md`](RESULTS-v2.md). The generator refuses a selected roster containing
+unconfirmed placeholder pricing.
+
+| arm | definition |
+|---|---|
+| `none` | Unmodified client baseline. |
+| `meta_filter` | v1 metadata redaction and provenance markers. |
+| `result_filter` | Result-side content redaction and provenance markers. |
+| `meta_and_result_filter` | Both metadata and result content filters. |
+| `pinning` | First-seen metadata pinning with drift and shadowing rejection. |
+| `policy` | Pre-dispatch capability policy with provenance taint tracking. |
+| `policy_full` | Policy plus pinning and both content filters. |
+| `confirm` | Simulated confirmation that denies tainted egress. |
+| `confirm_ux` | Simulated allow-all confirmation used to measure prompt burden. |
+| `model_hardening` | Model-facing trust-boundary instructions and provenance markers. |
 
 ## Install
 
@@ -254,25 +274,27 @@ silently regress.
 fixtures/payloads.py     # labeled, defanged attack dataset (seen + held-out registers)
 servers/
   benign/server.py       # well-behaved control server (calculate, add_note, lookup_user)
-  poisoned/server.py     # parametrized: renders any of the 4 classes by env var
+  poisoned/server.py     # parametrized: renders any of the 5 classes by env var
 harness/
   runner.py              # multi-server loop; three defense seams + append-only trace
-  arms.py                # none / meta_filter / policy / policy_full composition
+  arms.py                # ten composable v2 defense arms
   clients.py             # MCP→model wiring; routes Anthropic / OpenAI / DeepSeek / Gemini
   sweep.py               # experiment grid; named arms, task roots, scoring, cost smoke
 scorer/
   asr.py, utility.py     # frozen v1 pure trace scorers
   asr_v2.py              # attempted / realized / blocked / canary / truncation
   utility_v2.py          # v1-compatible utility + blocked-expected-tool signal
-  aggregate.py           # Wilson-CI matrices + baseline-vs-defended delta
+  aggregate.py           # frozen v1 Wilson-CI aggregation
+aggregate_v2.py          # long/wide ablations, deltas, and report summary
 defense/
   provenance.py          # frozen v1 metadata filter
   policy.py, taint.py    # pre-dispatch capability policy + per-trial provenance
   adversarial_tests.py   # attacks the defense; documents bypasses
 tasks/                   # frozen v1 tasks
 tasks/v2/                # policy-bearing copies used by capability arms
-config/                  # sweep configs (bench_heldout/seen/*_xvendor/*_gpt55/*_ext)
-run_*.sh, aggregate_all.py   # de-circularized run + merge
+config/v2/               # shared roster + six objective/register grids
+run_v2.sh                # resumable ten-arm driver and cost projection
+scripts/results_v2_md.py # CI-gated RESULTS-v2.md generator
 docs/                    # project page + architecture diagrams
 goals.md, prompts/       # v2 north star and staged implementation briefs
 ```
@@ -289,7 +311,8 @@ goals.md, prompts/       # v2 north star and staged implementation briefs
 - **Published runs must be versioned, not overwritten.** New publishable experiments
   belong under `results/<run-id>/`, with a `RUN.md` recording provenance. Per-trial JSONL
   traces, logs, and general result files remain git-ignored; the allowlisted `RUN.md`,
-  `matrix_*.csv`, and `delta_*.md` summaries may be committed. The legacy v1 drivers still
+  `matrix_*.csv`, `delta_*.md`, `deltas_*.md`, and `ablation_*.md` summaries may be
+  committed. The legacy v1 drivers still
   use fixed output paths and file-granular skipping, so inspect or remove partial/error
   files before rerunning them. The published v1 numbers in this README remain the
   canonical record; check out the `v1.0` tag and rerun its `run_*.sh` set to reproduce

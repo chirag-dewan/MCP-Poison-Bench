@@ -1,0 +1,20 @@
+{
+  "_comment": "v2 held-out argument-tampering grid. Cell n = tasks x payloads x seeds; every class has 2 tasks and 5 held-out payloads, so n = 2 x 5 x 4 = 40.",
+  "payload_set": "heldout",
+  "objective": "arg_tamper",
+  "task_dir": "tasks/v2",
+  "benign_server": "servers/benign/server.py",
+  "poisoned_server": "servers/poisoned/server.py",
+  "models": "@config/v2/roster.json",
+  "class_tasks": {
+    "tool_description": ["calc_add.json", "notes_pipeline.json"],
+    "schema_field": ["calc_add.json", "notes_pipeline.json"],
+    "rug_pull": ["notes_pipeline.json", "notes_review.json"],
+    "cross_server": ["account_review.json", "notes_review.json"],
+    "metadata_drift": ["notes_pipeline.json", "notes_review.json"]
+  },
+  "seeds": [1, 2, 3, 4],
+  "temperature": 1.0,
+  "max_concurrency": 4,
+  "relist_each_step": true
+}
