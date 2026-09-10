@@ -148,6 +148,8 @@ async def run(
     result_transform: ResultTransform | None = None,
     result_findings: list[Any] | None = None,
     call_policy: CallPolicy | None = None,
+    pinning_findings: list[Any] | None = None,
+    relist_each_step: bool = False,
 ) -> dict[str, Any]:
     """Run `task` against `model` with `server_paths` launched as MCP servers.
 
@@ -172,46 +174,129 @@ async def run(
             })
             sessions.append(session)
 
-        # Merge tools across servers, routing each name to its owning session.
-        tool_owner: dict[str, ClientSession] = {}
-        tool_server_path: dict[str, str] = {}
-        merged_tools = []
-        listed_events = []
-        for sp, session in zip(server_paths, sessions):
-            tools_result = await session.list_tools()
-            for t in tools_result.tools:
-                if t.name in tool_owner:
-                    trace.write({
-                        "type": "warning",
-                        "message": f"tool name collision {t.name!r}; keeping first",
-                        "server_path": str(sp),
-                    })
-                    continue
-                tool_owner[t.name] = session
-                tool_server_path[t.name] = str(sp)
-                merged_tools.append(t)
-            listed_events.append({
-                "server_path": str(sp),
-                "tools": [
-                    {"name": t.name, "description": t.description,
-                     "input_schema": t.inputSchema}
-                    for t in tools_result.tools
-                ],
-            })
+        async def list_model_tools(
+            step: int | None,
+        ) -> tuple[
+            list[dict[str, Any]], dict[str, ClientSession], dict[str, str],
+        ]:
+            """Discover, transform, de-duplicate, and trace model-facing tools."""
+            registrations: list[tuple[dict[str, Any], ClientSession, str]] = []
+            listed_events: list[dict[str, Any]] = []
+            seen_names: set[str] = set()
+            for sp, session in zip(server_paths, sessions):
+                server_path = str(sp)
+                tools_result = await session.list_tools()
+                converted = clients.mcp_tools_to_anthropic(tools_result.tools)
+                for tool in converted:
+                    name = tool["name"]
+                    if name in seen_names:
+                        trace.write({
+                            "type": "warning",
+                            "message": f"tool name collision {name!r}; keeping first",
+                            "server_path": server_path,
+                        })
+                        if pinning_findings is None:
+                            # Preserve the v1 transform contract: ordinary
+                            # transforms see only the first registration and no
+                            # runner-private provenance keys.
+                            continue
+                    else:
+                        seen_names.add(name)
+                    if pinning_findings is not None:
+                        # Pinning sees ordered registrations, including duplicates.
+                        # This runner-only provenance field is stripped below.
+                        tool["server_path"] = server_path
+                    registrations.append((tool, session, server_path))
+                listed_events.append({
+                    "server_path": server_path,
+                    "tools": [
+                        {"name": tool.name, "description": tool.description,
+                         "input_schema": tool.inputSchema}
+                        for tool in tools_result.tools
+                    ],
+                })
 
-        anthropic_tools = clients.mcp_tools_to_anthropic(merged_tools)
-        defended = False
-        if tool_transform is not None:
-            anthropic_tools = tool_transform(anthropic_tools)
-            defended = True
-        trace.write({
-            "type": "mcp_list_tools",
-            "defended": defended,
-            "result_transform_on": result_transform is not None,
-            "call_policy_on": call_policy is not None,
-            "servers": listed_events,
-            "tools_offered_to_model": anthropic_tools,
-        })
+            registration_owner: dict[tuple[str, str], ClientSession] = {}
+            raw_tool_owner: dict[str, ClientSession] = {}
+            raw_tool_server_path: dict[str, str] = {}
+            for tool, session, server_path in registrations:
+                registration_owner.setdefault(
+                    (tool["name"], server_path), session,
+                )
+                raw_tool_owner.setdefault(tool["name"], session)
+                raw_tool_server_path.setdefault(tool["name"], server_path)
+            first_owner: dict[str, tuple[ClientSession, str]] = {}
+            for tool, session, server_path in registrations:
+                first_owner.setdefault(tool["name"], (session, server_path))
+
+            if pinning_findings is not None:
+                pinning_findings.clear()
+            transformed = [tool for tool, _session, _path in registrations]
+            if tool_transform is not None:
+                transformed = tool_transform(transformed)
+
+            if pinning_findings is None:
+                # Legacy transforms affect only what the model sees; v1 retained
+                # the raw first-wins routing table even if a transform dropped a
+                # tool or returned an unusual list shape.
+                anthropic_tools = transformed
+                tool_owner = raw_tool_owner
+                tool_server_path = raw_tool_server_path
+            else:
+                anthropic_tools = []
+                tool_owner = {}
+                tool_server_path = {}
+                for transformed_tool in transformed:
+                    offered = dict(transformed_tool)
+                    server_path = offered.pop("server_path", None)
+                    name = offered.get("name")
+                    if not isinstance(name, str) or name in tool_owner:
+                        continue
+                    owner = registration_owner.get((name, server_path))
+                    if owner is None and name in first_owner:
+                        owner, server_path = first_owner[name]
+                    if owner is not None and isinstance(server_path, str):
+                        tool_owner[name] = owner
+                        tool_server_path[name] = server_path
+                    anthropic_tools.append(offered)
+
+            list_event: dict[str, Any] = {
+                "type": "mcp_list_tools",
+                "defended": tool_transform is not None,
+                "result_transform_on": result_transform is not None,
+                "call_policy_on": call_policy is not None,
+                "servers": listed_events,
+                "tools_offered_to_model": anthropic_tools,
+            }
+            if step is not None:
+                list_event["step"] = step
+            if pinning_findings is not None:
+                list_event["pinning_findings"] = [
+                    {
+                        "tool_name": finding.tool_name,
+                        "server_path": finding.server_path,
+                        "kind": finding.kind,
+                        "action": finding.action,
+                    }
+                    for finding in pinning_findings
+                ]
+            trace.write(list_event)
+            if pinning_findings is not None:
+                for finding in pinning_findings:
+                    drift_event = {
+                        "type": "metadata_drift",
+                        "tool_name": finding.tool_name,
+                        "server_path": finding.server_path,
+                        "kind": finding.kind,
+                        "action": finding.action,
+                    }
+                    if step is not None:
+                        drift_event["step"] = step
+                    trace.write(drift_event)
+            return anthropic_tools, tool_owner, tool_server_path
+
+        list_step = 0 if relist_each_step else None
+        anthropic_tools, tool_owner, tool_server_path = await list_model_tools(list_step)
 
         system = task.get("context")
         messages: list[dict[str, Any]] = [{"role": "user", "content": task["prompt"]}]
@@ -221,6 +306,10 @@ async def run(
         truncated = False
         step = 0
         for step in range(MAX_STEPS):
+            if relist_each_step and step > 0:
+                anthropic_tools, tool_owner, tool_server_path = (
+                    await list_model_tools(step)
+                )
             resp = clients.complete(
                 model=model, system=system, tools=anthropic_tools,
                 messages=messages, temperature=temperature, max_tokens=MAX_TOKENS,
@@ -359,6 +448,8 @@ def run_trial(
     result_transform: ResultTransform | None = None,
     result_findings: list[Any] | None = None,
     call_policy: CallPolicy | None = None,
+    pinning_findings: list[Any] | None = None,
+    relist_each_step: bool = False,
     on_event: EventHook | None = None,
 ) -> tuple[dict[str, Any], Path]:
     """Run one trial end to end (own event loop) and return (summary, trace_path).
@@ -399,6 +490,8 @@ def run_trial(
             result_transform=result_transform,
             result_findings=result_findings,
             call_policy=call_policy,
+            pinning_findings=pinning_findings,
+            relist_each_step=relist_each_step,
         ))
     finally:
         trace.close()

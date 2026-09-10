@@ -34,6 +34,7 @@ def test_build_trial_specs_replaces_leading_tasks_root(tmp_path, monkeypatch):
         "benign_server": "benign.py",
         "poisoned_server": "poisoned.py",
         "seeds": [1],
+        "relist_each_step": True,
     }
     monkeypatch.setattr(sweep.clients, "has_api_key", lambda _model: True)
 
@@ -41,6 +42,7 @@ def test_build_trial_specs_replaces_leading_tasks_root(tmp_path, monkeypatch):
 
     assert specs[0]["task"] == task
     assert specs[0]["task_id"] == "replacement-task"
+    assert specs[0]["relist_each_step"] is True
 
 
 def test_run_one_uses_trace_config_for_git_sha_and_records_v2_utility(
@@ -83,6 +85,7 @@ def test_run_one_uses_trace_config_for_git_sha_and_records_v2_utility(
         encoding="utf-8",
     )
     seen: dict[str, object] = {}
+    pinning_findings: list[object] = []
 
     def fake_build_arm(name, arm_task):
         seen["name"] = name
@@ -91,11 +94,14 @@ def test_run_one_uses_trace_config_for_git_sha_and_records_v2_utility(
             "tool_transform": None,
             "result_transform": None,
             "call_policy": None,
+            "pinning_findings": pinning_findings,
+            "relist_each_step": True,
         }
 
-    def fake_run_trial(**_kwargs):
+    def fake_run_trial(**kwargs):
         # The live summary is deliberately misleading: provenance belongs to
         # the durable trace's run_config event.
+        seen["run_trial_kwargs"] = kwargs
         return {"git_sha": "summary-sha"}, trace_path
 
     monkeypatch.setattr(sweep.arms, "build_arm", fake_build_arm)
@@ -103,7 +109,11 @@ def test_run_one_uses_trace_config_for_git_sha_and_records_v2_utility(
 
     record = sweep._run_one(_spec(task), 1.0, "policy", tmp_path)
 
-    assert seen == {"name": "policy", "task": task}
+    assert seen["name"] == "policy"
+    assert seen["task"] == task
+    run_trial_kwargs = seen["run_trial_kwargs"]
+    assert run_trial_kwargs["pinning_findings"] is pinning_findings
+    assert run_trial_kwargs["relist_each_step"] is True
     assert record["blocked_expected_tool"] is True
     assert record["git_sha"] == "trace-sha"
 

@@ -25,9 +25,13 @@ from fixtures.payloads import (
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
-def test_all_four_classes_present():
+def test_all_classes_present_with_original_order_preserved():
+    assert ATTACK_CLASSES[:4] == (
+        "tool_description", "schema_field", "rug_pull", "cross_server",
+    )
     assert set(ATTACK_CLASSES) == {
         "tool_description", "schema_field", "rug_pull", "cross_server",
+        "metadata_drift",
     }
     for cls in ATTACK_CLASSES:
         assert PAYLOADS[cls], f"class {cls} has no payloads"

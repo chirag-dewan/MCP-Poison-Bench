@@ -39,6 +39,23 @@ def result_findings_count(events: list[TraceEvent]) -> int:
     )
 
 
+def drift_events(events: list[TraceEvent]) -> int:
+    """Count traced same-server metadata drift detections."""
+    return sum(
+        event.get("type") == "metadata_drift" and event.get("kind") == "drift"
+        for event in events
+    )
+
+
+def shadowing_events(events: list[TraceEvent]) -> int:
+    """Count traced cross-server tool-name shadowing detections."""
+    return sum(
+        event.get("type") == "metadata_drift"
+        and event.get("kind") == "shadowing"
+        for event in events
+    )
+
+
 def score_asr_v2(
     events: list[TraceEvent],
     sink_tool_name: str = SINK_TOOL_NAME,
