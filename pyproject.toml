@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcp-poison-bench"
+version = "0.1.0"
+description = "Benchmark harness for MCP tool-poisoning attacks (servers, runner, scorer, defense)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Chirag Dewan" }]
+
+# Runtime deps for the importable harness (harness.runner + harness.clients).
+# Pinned as lower bounds here so downstreams can resolve; the exact published-run
+# pins live in requirements.lock.txt.
+dependencies = [
+    "mcp>=1.27",
+    "anthropic>=0.105",
+]
+
+[project.optional-dependencies]
+# Extra model vendors. clients.py imports these lazily, only when a matching
+# model id is requested, so they are not required for the Anthropic path.
+openai = ["openai>=2.38"]
+google = ["google-genai>=0.3"]
+
+[tool.setuptools]
+# Only the harness is exposed as an installable library. The benchmark fixtures
+# (servers/, tasks/, scorer/, defense/, fixtures/) are run from a repo checkout;
+# the poisoned server self-bootstraps sys.path so it resolves them when launched
+# by absolute path. harness.sweep is shipped but imports siblings, so it is only
+# usable from a full checkout — import harness.runner / harness.clients downstream.
+packages = ["harness"]
