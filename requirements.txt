@@ -1,6 +1,6 @@
 # MCP-Poison-Bench — current direct dependencies, pinned for repeatable installs.
 # Python 3.14.3 (see .python-version). Full transitive snapshot: requirements.lock.txt.
-mcp==1.28.1
+mcp==2.2.0
 anthropic==0.105.2
 openai==2.38.0
 pydantic==2.13.4
