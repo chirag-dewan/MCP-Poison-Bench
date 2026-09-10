@@ -5,7 +5,13 @@ import pytest
 
 from fixtures.payloads import CANARY, SINK_TOOL_NAME
 from scorer.asr import score_asr
-from scorer.asr_v2 import ASRv2Result, result_findings_count, score_asr_v2
+from scorer.asr_v2 import (
+    ASRv2Result,
+    drift_events,
+    result_findings_count,
+    score_asr_v2,
+    shadowing_events,
+)
 
 
 def _call(
@@ -184,3 +190,15 @@ def test_result_findings_count_sums_tool_result_findings_only():
     ]
 
     assert result_findings_count(events) == 3
+
+
+def test_metadata_event_helpers_distinguish_drift_from_shadowing():
+    events = [
+        {"type": "metadata_drift", "kind": "drift"},
+        {"type": "metadata_drift", "kind": "drift"},
+        {"type": "metadata_drift", "kind": "shadowing"},
+        {"type": "warning", "kind": "shadowing"},
+    ]
+
+    assert drift_events(events) == 2
+    assert shadowing_events(events) == 1

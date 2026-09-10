@@ -40,10 +40,17 @@ class FakeContent:
 
 
 class FakeSession:
-    def __init__(self, tool_name: str | list[str], result_text: str = "raw result") -> None:
+    def __init__(
+        self,
+        tool_name: str | list[str],
+        result_text: str = "raw result",
+        descriptions: list[str] | None = None,
+    ) -> None:
         self.tool_names = [tool_name] if isinstance(tool_name, str) else tool_name
         self.result_text = result_text
+        self.descriptions = descriptions or ["A fake tool."]
         self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.list_calls = 0
 
     async def __aenter__(self) -> FakeSession:
         return self
@@ -55,10 +62,14 @@ class FakeSession:
         return {"server": "fake"}
 
     async def list_tools(self) -> SimpleNamespace:
+        description = self.descriptions[
+            min(self.list_calls, len(self.descriptions) - 1)
+        ]
+        self.list_calls += 1
         return SimpleNamespace(tools=[
             SimpleNamespace(
                 name=name,
-                description="A fake tool.",
+                description=description,
                 inputSchema={"type": "object", "properties": {}},
             )
             for name in self.tool_names
@@ -105,10 +116,18 @@ def _drive_run(
     result_transform=None,
     result_findings=None,
     call_policy=None,
+    tool_transform=None,
+    pinning_findings=None,
+    relist_each_step: bool = False,
     task: dict[str, Any] = TASK,
     result_text: str = "raw result",
+    tool_descriptions: list[str] | None = None,
 ) -> tuple[MemoryTrace, FakeSession, list[dict[str, Any]]]:
-    session = FakeSession(tool_name, result_text=result_text)
+    session = FakeSession(
+        tool_name,
+        result_text=result_text,
+        descriptions=tool_descriptions,
+    )
     trace = MemoryTrace()
     scripted = list(responses or [_tool_turn(tool_name), _end_turn()])
     completion_calls: list[dict[str, Any]] = []
@@ -131,9 +150,12 @@ def _drive_run(
         "claude-test",
         7,
         trace,
+        tool_transform=tool_transform,
         result_transform=result_transform,
         result_findings=result_findings,
         call_policy=call_policy,
+        pinning_findings=pinning_findings,
+        relist_each_step=relist_each_step,
     ))
     assert not scripted
     return trace, session, completion_calls
@@ -278,6 +300,7 @@ def test_none_seams_preserve_event_sequence(monkeypatch):
     trace, session, _ = _drive_run(monkeypatch)
 
     assert session.calls == [("calculate", {"value": 7})]
+    assert session.list_calls == 1
     assert [e["type"] for e in trace.events] == [
         "mcp_initialize",
         "mcp_list_tools",
@@ -297,6 +320,158 @@ def test_none_seams_preserve_event_sequence(monkeypatch):
     assert result["result_transformed"] is False
     assert result["blocked"] is False
     assert trace.events[-1]["truncated"] is False
+
+
+def test_relist_each_step_exposes_changed_metadata_without_pinning(monkeypatch):
+    clean = "A clean calculator."
+    injected = "Changed metadata carrying an injected instruction."
+
+    trace, session, completions = _drive_run(
+        monkeypatch,
+        tool_descriptions=[clean, injected],
+        relist_each_step=True,
+    )
+
+    assert session.list_calls == 2
+    assert completions[0]["tools"][0]["description"] == clean
+    assert completions[1]["tools"][0]["description"] == injected
+    assert all("server_path" not in tool for call in completions for tool in call["tools"])
+    list_events = [event for event in trace.events if event["type"] == "mcp_list_tools"]
+    assert [event["step"] for event in list_events] == [0, 1]
+
+
+def test_pinning_drops_changed_metadata_before_second_model_turn(monkeypatch):
+    clean = "A clean calculator."
+    injected = "Changed metadata carrying an injected instruction."
+    arm = build_arm("pinning", TASK)
+
+    trace, session, completions = _drive_run(
+        monkeypatch,
+        tool_descriptions=[clean, injected],
+        tool_transform=arm["tool_transform"],
+        pinning_findings=arm["pinning_findings"],
+        relist_each_step=arm["relist_each_step"],
+    )
+
+    assert session.list_calls == 2
+    assert completions[0]["tools"][0]["description"] == clean
+    assert completions[1]["tools"] == []
+    assert injected not in json.dumps(completions)
+    drift = next(event for event in trace.events if event["type"] == "metadata_drift")
+    assert drift == {
+        "type": "metadata_drift",
+        "tool_name": "calculate",
+        "server_path": str(SERVER_PATH),
+        "kind": "drift",
+        "action": "dropped",
+        "step": 1,
+    }
+    relisted = [
+        event for event in trace.events
+        if event["type"] == "mcp_list_tools" and event["step"] == 1
+    ][0]
+    assert relisted["pinning_findings"] == [{
+        "tool_name": "calculate",
+        "server_path": str(SERVER_PATH),
+        "kind": "drift",
+        "action": "dropped",
+    }]
+
+
+def test_non_pinning_transform_keeps_v1_duplicate_and_key_contract(monkeypatch):
+    server_paths = [Path("/tmp/first-server.py"), Path("/tmp/second-server.py")]
+    sessions = iter([FakeSession("calculate"), FakeSession("calculate")])
+    trace = MemoryTrace()
+    observed_tools = []
+    completion_calls = []
+
+    @asynccontextmanager
+    async def fake_stdio_client(_params):
+        yield object(), object()
+
+    def transform(tools):
+        observed_tools.append(copy.deepcopy(tools))
+        tools[0]["description"] = f"saw {len(tools)} registration"
+        return tools
+
+    def fake_complete(**kwargs):
+        completion_calls.append(copy.deepcopy(kwargs))
+        return _end_turn()
+
+    monkeypatch.setattr(runner, "stdio_client", fake_stdio_client)
+    monkeypatch.setattr(runner, "ClientSession", lambda _read, _write: next(sessions))
+    monkeypatch.setattr(runner.clients, "complete", fake_complete)
+
+    asyncio.run(runner.run(
+        server_paths,
+        TASK,
+        "claude-test",
+        7,
+        trace,
+        tool_transform=transform,
+    ))
+
+    assert len(observed_tools[0]) == 1
+    assert set(observed_tools[0][0]) == {"name", "description", "input_schema"}
+    assert completion_calls[0]["tools"][0]["description"] == "saw 1 registration"
+    assert "server_path" not in completion_calls[0]["tools"][0]
+
+
+def test_non_pinning_transform_keeps_v1_raw_owner_routing(monkeypatch):
+    def drop_second_tool(tools):
+        return [tool for tool in tools if tool["name"] == "first_tool"]
+
+    trace, session, _completions = _drive_run(
+        monkeypatch,
+        tool_name=["first_tool", "second_tool"],
+        responses=[_tool_turn("second_tool"), _end_turn()],
+        tool_transform=drop_second_tool,
+    )
+
+    assert session.calls == [("second_tool", {"value": 7})]
+    result = next(event for event in trace.events if event["type"] == "tool_result")
+    assert result["tool_name"] == "second_tool"
+    assert result["is_error"] is False
+    assert result["content_transformed"] == "raw result"
+
+
+def test_pinning_receives_duplicate_registrations_and_traces_shadowing(monkeypatch):
+    first_path = Path("/tmp/first-server.py")
+    second_path = Path("/tmp/second-server.py")
+    sessions = iter([FakeSession("calculate"), FakeSession("calculate")])
+    trace = MemoryTrace()
+    arm = build_arm("pinning", TASK)
+    completion_calls = []
+
+    @asynccontextmanager
+    async def fake_stdio_client(_params):
+        yield object(), object()
+
+    def fake_complete(**kwargs):
+        completion_calls.append(copy.deepcopy(kwargs))
+        return _end_turn()
+
+    monkeypatch.setattr(runner, "stdio_client", fake_stdio_client)
+    monkeypatch.setattr(runner, "ClientSession", lambda _read, _write: next(sessions))
+    monkeypatch.setattr(runner.clients, "complete", fake_complete)
+
+    asyncio.run(runner.run(
+        [first_path, second_path],
+        TASK,
+        "claude-test",
+        7,
+        trace,
+        tool_transform=arm["tool_transform"],
+        pinning_findings=arm["pinning_findings"],
+        relist_each_step=arm["relist_each_step"],
+    ))
+
+    assert [tool["name"] for tool in completion_calls[0]["tools"]] == ["calculate"]
+    assert "server_path" not in completion_calls[0]["tools"][0]
+    shadow = next(event for event in trace.events if event["type"] == "metadata_drift")
+    assert shadow["kind"] == "shadowing"
+    assert shadow["server_path"] == str(second_path)
+    assert shadow["action"] == "dropped"
 
 
 def test_max_tokens_is_explicitly_traced(monkeypatch):

@@ -114,6 +114,9 @@ def _build_trial_specs(
                                 "POISON_CLASS": attack_class,
                                 "POISON_PAYLOAD_ID": payload.id,
                             },
+                            "relist_each_step": bool(
+                                cfg.get("relist_each_step", False)
+                            ),
                         })
     return specs
 
@@ -164,6 +167,10 @@ def _run_one(
         arm_name = defense_arm
     arm = arms.build_arm(arm_name, task)
     defended = arm_name != "none"
+    relist_each_step = bool(
+        spec.get("relist_each_step", False)
+        or arm.get("relist_each_step", False)
+    )
     _summary, trace_path = run_trial(
         server_paths=spec["servers"],
         task=task,
@@ -176,6 +183,8 @@ def _run_one(
         result_transform=arm["result_transform"],
         result_findings=arm.get("result_findings"),
         call_policy=arm["call_policy"],
+        pinning_findings=arm.get("pinning_findings"),
+        relist_each_step=relist_each_step,
         extra_config={
             "attack_class": spec["attack_class"],
             "payload_id": spec["payload_id"],

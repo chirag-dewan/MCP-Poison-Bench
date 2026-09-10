@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from defense import provenance
+from defense import pinning, provenance
 from fixtures.payloads import get_payload
 from harness.arms import ARM_NAMES, build_arm
 
@@ -50,6 +50,7 @@ def test_registry_includes_result_and_policy_arms():
         "meta_filter",
         "result_filter",
         "meta_and_result_filter",
+        "pinning",
         "policy",
         "policy_full",
     )
@@ -76,17 +77,53 @@ def test_policy_arm_wires_policy_and_recording_transform():
     assert callable(arm["call_policy"])
 
 
-def test_policy_full_adds_v1_metadata_transform(monkeypatch):
-    def transform(tools):
+def test_policy_full_pins_before_v1_metadata_transform(monkeypatch):
+    order = []
+
+    def pin_transform(tools):
+        order.append("pinning")
         return tools
 
-    monkeypatch.setattr(provenance, "build_tool_transform", lambda: transform)
+    def meta_transform(tools):
+        order.append("meta_filter")
+        return tools
+
+    monkeypatch.setattr(
+        pinning,
+        "build_pinning_transform",
+        lambda _store, on_findings: pin_transform,
+    )
+    monkeypatch.setattr(provenance, "build_tool_transform", lambda: meta_transform)
 
     arm = build_arm("policy_full", TASK)
+    arm["tool_transform"]([])
 
-    assert arm["tool_transform"] is transform
+    assert order == ["pinning", "meta_filter"]
     assert callable(arm["result_transform"])
     assert callable(arm["call_policy"])
+    assert arm["pinning_findings"] == []
+    assert arm["relist_each_step"] is True
+
+
+def test_pinning_arm_uses_fresh_store_and_requests_relisting():
+    first = build_arm("pinning", TASK)
+    second = build_arm("pinning", TASK)
+    original = {
+        "name": "calculate",
+        "description": "clean",
+        "input_schema": {},
+        "server_path": "server.py",
+    }
+    changed = {**original, "description": "changed"}
+
+    assert first["tool_transform"]([original]) == [original]
+    assert first["tool_transform"]([changed]) == []
+    assert second["tool_transform"]([changed]) == [changed]
+    assert first["pinning_findings"]
+    assert second["pinning_findings"] == []
+    assert first["result_transform"] is None
+    assert first["call_policy"] is None
+    assert first["relist_each_step"] is True
 
 
 def test_policy_full_records_raw_result_before_filtering():

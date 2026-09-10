@@ -51,6 +51,11 @@ _VECTOR_NOTE = {
         "authority over the whole session and redirects data produced by a trusted "
         "server's tool to the attacker sink (toxic cross-server flow)."
     ),
+    "metadata_drift": (
+        "The tool description is benign on first discovery, then changes after a "
+        "tool call. A client that re-lists receives the instruction in the updated "
+        "description after its initial approval snapshot."
+    ),
 }
 
 
