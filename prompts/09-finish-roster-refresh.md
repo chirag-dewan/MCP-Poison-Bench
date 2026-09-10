@@ -1,22 +1,24 @@
-# Prompt 09 — Finish the 2026-07 roster refresh (independent of v2)
+# Prompt 09 — Finish the 2026-07 roster refresh
 
-Branch: the existing `claude/mcp-poison-bench-roster-refresh-*` branch. Depends on:
-nothing in v2. **Do not merge any v2 change into this branch** — it must remain a
-pure re-run of v1 on new models so the comparison is clean. Requires API keys in a
-`.env` (never commit it).
+Branch: a fresh branch off `master` (the refresh tooling is already merged there).
+Depends on: nothing beyond what `master` already has. The run uses only the `none` /
+`meta_filter` arms, which are snapshot-tested to reproduce v1's trace shape, so it
+stays a re-run of v1's protocol on new models — but per `goals.md §6` it must
+disclose the git SHA and the harness deviations listed below rather than claim a
+byte-identical roster-only rerun. Requires API keys in a `.env` (never commit it).
 
 ## Read first
 
 1. `README.md` (v1 numbers are the comparison target), `goals.md §6`.
 2. On the branch: `config/refresh/*.json`, `run_refresh.sh`, `aggregate_refresh.py`,
    `harness/pricing.py`, and the `--dry-run` report code in `harness/sweep.py`.
-3. `harness/clients.py::_complete_anthropic` — it sends `temperature`
-   unconditionally. Current Anthropic frontier models may reject sampling params
-   with a 400. **If the dry-run 400s on `claude-opus-4-8` for this reason**, the
-   minimal, comparability-preserving fix on this branch is to omit `temperature`
-   for that model only, record `"sampling": {"sent": false}` in usage, and note in
-   `RUN.md` that Opus sampled at its default. Do not port prompt 01's broader
-   changes here.
+3. `harness/clients.py::supports_sampling_params` — the harness already omits
+   `temperature` for current Anthropic frontier models (they reject sampling
+   params) and records `usage.sampling.{temperature, sent}` in every trace. Two
+   deviations from the v1 harness therefore apply to this run and **must be
+   written into `RUN.md`**: Opus 4.8 samples at its default, and length-capped
+   responses surface as `stop_reason == "max_tokens"` (v1 recorded them as
+   `end_turn`). Neither changes trial generation.
 
 ## Steps
 
