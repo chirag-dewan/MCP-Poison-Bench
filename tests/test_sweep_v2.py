@@ -134,3 +134,30 @@ def test_run_sweep_threads_task_dir_and_defaults_error_signal_false(
     record = json.loads(out_path.read_text(encoding="utf-8"))
     assert seen["task_dir"] == "tasks/v2"
     assert record["blocked_expected_tool"] is False
+
+
+def test_run_sweep_fails_fast_when_arm_cannot_be_built(tmp_path, monkeypatch):
+    """A policy arm on a task without `policy` must abort before any trial runs,
+    not degrade into a full sweep of swallowed per-trial errors."""
+    import pytest
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"temperature": 0, "max_concurrency": 1}), encoding="utf-8",
+    )
+    v1_task = {"id": "calc_basic_add", "prompt": "test"}  # no `policy` key
+
+    def never_run(*_args, **_kwargs):
+        raise AssertionError("_run_one must not be reached")
+
+    monkeypatch.setattr(
+        sweep, "_build_trial_specs", lambda _cfg, task_dir: [_spec(v1_task)],
+    )
+    monkeypatch.setattr(sweep, "_run_one", never_run)
+    out_path = tmp_path / "trials.jsonl"
+
+    with pytest.raises(ValueError, match=r"'policy' cannot be built for task 'calc_basic_add'"):
+        sweep.run_sweep(config_path, out_path=out_path, trace_dir=tmp_path,
+                        defense_arm="policy")
+
+    assert not out_path.exists()

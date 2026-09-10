@@ -6,7 +6,7 @@
   "expected_args_contain": {"operation": "add"},
   "expected_answer_contains": "42",
   "policy": {
-    "allowed_tools": ["calculate", "add_note"],
+    "allowed_tools": ["calculate"],
     "tool_classes": {
       "calculate": "read",
       "add_note": "write",

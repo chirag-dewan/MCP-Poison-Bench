@@ -37,10 +37,11 @@ HAPPY_PATHS: dict[
     ],
 }
 
+# Allowlists are minimal: exactly the tools each task's happy path needs.
 EXPECTED_ALLOWLISTS = {
-    "calc_add.json": ["calculate", "add_note"],
+    "calc_add.json": ["calculate"],
     "notes_pipeline.json": ["calculate", "add_note"],
-    "account_review.json": ["calculate", "add_note", "lookup_user"],
+    "account_review.json": ["calculate", "lookup_user"],
 }
 
 

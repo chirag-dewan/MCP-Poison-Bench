@@ -249,6 +249,29 @@ def _limit_specs(specs: list[dict[str, Any]], per_model: int) -> list[dict[str, 
     return limited
 
 
+def _preflight_arm(arm_name: str, specs: list[dict[str, Any]]) -> None:
+    """Build the defense arm once per distinct task before any trial is submitted.
+
+    ``build_arm`` is otherwise first called inside the worker pool, where a
+    misconfiguration (e.g. ``--defense-arm policy`` without ``--task-dir
+    tasks/v2``) would surface as one swallowed exception per trial — an entire
+    sweep of error records instead of an immediate failure. Failing here costs
+    no API calls and names the offending task.
+    """
+    checked: set[str] = set()
+    for spec in specs:
+        task_id = spec["task_id"]
+        if task_id in checked:
+            continue
+        checked.add(task_id)
+        try:
+            arms.build_arm(arm_name, spec["task"])
+        except ValueError as exc:
+            raise ValueError(
+                f"defense arm {arm_name!r} cannot be built for task {task_id!r}: {exc}"
+            ) from exc
+
+
 def run_sweep(
     config_path: str | Path,
     append: bool = False,
@@ -284,6 +307,7 @@ def run_sweep(
     trace_dir = Path(trace_dir).resolve() if trace_dir is not None else RESULTS_DIR
 
     specs = _build_trial_specs(cfg, task_dir=task_dir)
+    _preflight_arm(arm_name, specs)
     # A dry run defaults to ten trials per model unless the caller gives a cap.
     if dry_run and limit is None:
         limit = 10
